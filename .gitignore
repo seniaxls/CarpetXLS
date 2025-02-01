@@ -1,0 +1,89 @@
+# Скомпилированные Python файлы
+__pycache__/
+*.py[cod]
+
+# Виртуальное окружение
+.venv/
+venv/
+env/
+ENV/
+
+# Базы данных
+*.sqlite3
+db.sqlite3
+
+# Статические и медиафайлы
+staticfiles/
+media/
+
+# Конфигурационные файлы с секретами
+.env
+*.env
+.env.local
+.env.*
+.env*.bak
+
+# Логи
+*.log
+logs/
+
+# Кэш и временные файлы
+*~
+.thumbs/
+.git Thom File/
+
+# Docker
+.dockerenv
+docker-compose.override.yml
+
+# IDE
+.idea/
+.vscode/
+*.code-workspace
+
+# macOS
+.DS_Store
+
+# Distribution / packaging
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+
+# Translations
+*.mo
+*.pot
+
+# Celery (если используете)
+celerybeat-schedule
+
+# React/Next.js (если используете фронтенд)
+.next/
+.build/
+
+123
