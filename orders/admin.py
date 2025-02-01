@@ -99,9 +99,9 @@ class MembershipInline(admin.TabularInline):
 
     def get_fields(self, request, obj=None):
         if obj:
-            if 6 > obj.check_stage_hide >= 2:
+            if 8 > obj.check_stage_hide >= 4:
                 return ['message', "overlock", "allowance", 'comment']
-            elif obj.check_stage_hide >= 6:
+            elif obj.check_stage_hide >= 8:
                 return ['message', 'comment']
             else:
                 return ['message', "product", ("height", "width"), "product_add", "overlock", "allowance", 'comment']
@@ -110,7 +110,7 @@ class MembershipInline(admin.TabularInline):
 
     def get_readonly_fields(self, request, obj=None):
         if obj:
-            if 7 >= obj.check_stage_hide >= 6:
+            if 8 >= obj.check_stage_hide >= 7:
                 return ["message", 'comment']
             return ["message", ]
         else:
@@ -120,12 +120,18 @@ class MembershipInline(admin.TabularInline):
 class MembershipInline2(admin.TabularInline):
     form = SecondProductOrderForm
     model = SecondProductOrder
-    extra = 1
     classes = ['collapse']
     template = "admin/orders/Order/myinline.html"
 
     def get_fields(self, request, obj=None):
         return ["product", "second_amount", ]
+
+    def get_extra(self, request, obj=None, **kwargs):
+        extra = 1
+        if obj:
+            if SecondProductOrder.objects.filter(order_id=obj.id).exists():
+                extra = 0
+        return extra
 
 
 # class SecondProductListFilter(admin.SimpleListFilter):
@@ -279,11 +285,12 @@ class OrderEdite(admin.ModelAdmin):
         return None
 
     def create_payroll_records(self, orders, new_status, user):
-        valid_stages = ['Принят в цех', 'Грязный-Склад', 'Выбивание', 'Стирка', 'Финишка']
+        valid_stages = ['Грязный-Склад', 'Выбивание', 'Стирка', 'Финишка']
         stage_order = {stage.name: index for index, stage in
                        enumerate(Stage.objects.filter(name__in=valid_stages).order_by('group_stage'))}
 
         for order in orders:
+            print(orders)
             current_stage_name = order.stage.name if order.stage else None
             if current_stage_name not in stage_order:
                 self.message_user(request,
@@ -302,107 +309,25 @@ class OrderEdite(admin.ModelAdmin):
 
             stages_to_process = [stage for stage in valid_stages if
                                  stage_order[stage] > current_stage_index and stage_order[stage] <= target_stage_index]
-
             for stage_name in stages_to_process:
-                for product_order in order.product_order.all():
-                    area = self.calculate_product_area(product_order)
 
-                    if stage_name == 'Грязный-Склад':
-                        PayrollRecord.objects.create(
-                            user=user,
-                            order=order,
-                            status='Грязный-Склад',
-                            product_name=product_order.product.product_name,
-                            area=area
-                        )
-                    elif stage_name == 'Выбивание':
-                        PayrollRecord.objects.create(
-                            user=user,
-                            order=order,
-                            status='Выбивание',
-                            product_name=product_order.product.product_name,
-                            area=area
-                        )
-                    elif stage_name == 'Стирка':
-                        PayrollRecord.objects.create(
-                            user=user,
-                            order=order,
-                            status='Стирка',
-                            product_name=product_order.product.product_name,
-                            area=area
-                        )
-                        for additional_product in product_order.product_add.all():
-                            additional_area = self.calculate_additional_product_area(additional_product, area)
-                            if additional_area is not None:
-                                PayrollRecord.objects.create(
-                                    user=user,
-                                    order=order,
-                                    status='Стирка',
-                                    product_name=product_order.product.product_name,
-                                    additional_product_name=additional_product.product_name,
-                                    additional_product_area=additional_area
-                                )
-                            elif additional_product.product_unit.size_numb == 0:
-                                PayrollRecord.objects.create(
-                                    user=user,
-                                    order=order,
-                                    status='Стирка',
-                                    product_name=product_order.product.product_name,
-                                    additional_product_name=additional_product.product_name,
-                                    additional_product_price=additional_product.product_price
-                                )
-                        if product_order.overlock and product_order.overlock > 0:
-                            PayrollRecord.objects.create(
-                                user=user,
-                                order=order,
-                                status='Стирка',
-                                product_name=product_order.product.product_name,
-                                overlock=product_order.overlock
-                            )
-                        if product_order.allowance and product_order.allowance > 0:
-                            PayrollRecord.objects.create(
-                                user=user,
-                                order=order,
-                                status='Стирка',
-                                product_name=product_order.product.product_name,
-                                allowance=product_order.allowance
-                            )
+                if stage_name == 'Выбивание':
+                    order.stage = Stage.objects.get(name=stage_name)
+                    order.save()
+                elif stage_name == 'Стирка':
+                    order.stage = Stage.objects.get(name=stage_name)
+                    order.save()
 
-                    elif stage_name == 'Финишка':
-                        PayrollRecord.objects.create(
-                            user=user,
-                            order=order,
-                            status='Финишка',
-                            product_name=product_order.product.product_name,
-                            area=area
-                        )
-                        if product_order.overlock and product_order.overlock > 0:
-                            PayrollRecord.objects.create(
-                                user=user,
-                                order=order,
-                                status='Финишка',
-                                product_name=product_order.product.product_name,
-                                overlock=product_order.overlock
-                            )
+                elif stage_name == 'Финишка':
+                    order.stage = Stage.objects.get(name=stage_name)
+                    order.save()
 
-            # После создания всех необходимых записей, меняем статус заказа на целевой
-            order.stage = Stage.objects.get(name=new_status)
-            order.save()
 
-    @admin.action(description='Перейти на статус Грязный-Склад')
-    def make_dirty_warehouse(self, request, queryset):
-        valid_initial_stages = ['Принят в цех']
-        for order in queryset:
-            if order.stage.name not in valid_initial_stages:
-                self.message_user(request,
-                                  f"Заказ {order.order_number} не может быть обработан: Начальный статус должен быть один из {valid_initial_stages}.",
-                                  level='error')
-                return
-        self.create_payroll_records(queryset, 'Грязный-Склад', request.user)
+
 
     @admin.action(description='Перейти на статус Выбивание')
     def make_beating(self, request, queryset):
-        valid_initial_stages = ['Принят в цех', 'Грязный-Склад']
+        valid_initial_stages = ['Грязный-Склад']
         for order in queryset:
             if order.stage.name not in valid_initial_stages:
                 self.message_user(request,
@@ -413,7 +338,7 @@ class OrderEdite(admin.ModelAdmin):
 
     @admin.action(description='Перейти на статус Стирка')
     def make_washing(self, request, queryset):
-        valid_initial_stages = ['Принят в цех', 'Грязный-Склад', 'Выбивание']
+        valid_initial_stages = ['Грязный-Склад', 'Выбивание']
         for order in queryset:
             if order.stage.name not in valid_initial_stages:
                 self.message_user(request,
@@ -424,7 +349,7 @@ class OrderEdite(admin.ModelAdmin):
 
     @admin.action(description='Перейти на статус Финишка')
     def make_finishing(self, request, queryset):
-        valid_initial_stages = ['Принят в цех', 'Грязный-Склад', 'Выбивание', 'Стирка']
+        valid_initial_stages = ['Грязный-Склад', 'Выбивание', 'Стирка']
         for order in queryset:
             if order.stage.name not in valid_initial_stages:
                 self.message_user(request,
@@ -447,7 +372,7 @@ class OrderEdite(admin.ModelAdmin):
             order.save()
             # Не создаем записи в PayrollRecord для этого статуса
 
-    actions = [make_dirty_warehouse, make_beating, make_washing, make_finishing, make_clean_warehouse]
+    actions = [ make_beating, make_washing, make_finishing, make_clean_warehouse]
 
 class ProductUnitEdite(admin.ModelAdmin):
     readonly_fields = ['size_numb', 'size_name', 'size_name_short']
@@ -463,7 +388,7 @@ admin.site.register(SecondProductOrder)
 admin.site.register(Stage)
 admin.site.register(ProductUnit, ProductUnitEdite)
 
-admin.site.site_header = 'crpetxls'
+admin.site.site_header = 'carpetxls'
 admin.site.site_title = ''
 admin.site.index_title = ''
 

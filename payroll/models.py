@@ -9,10 +9,7 @@ class PayrollRecord(models.Model):
     product_name = models.CharField(max_length=100, null=True, blank=True)
     area = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     additional_product_name = models.CharField(max_length=100, null=True, blank=True)
-    additional_product_area = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     additional_product_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
-    overlock = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
-    allowance = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
 
     class Meta:
         verbose_name = 'Запись зарплаты'

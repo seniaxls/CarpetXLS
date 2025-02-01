@@ -5,7 +5,7 @@ import django
 from datetime import datetime, timedelta, date
 
 # Устанавливаем переменную окружения DJANGO_SETTINGS_MODULE
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'crpetxls.settings')  # Замените 'myproject.settings' на ваш путь к файлу настроек
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'carpetxls.settings')  # Замените 'myproject.settings' на ваш путь к файлу настроек
 
 # Инициализируем Django
 django.setup()

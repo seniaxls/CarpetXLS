@@ -3,7 +3,7 @@ import django
 from faker import Faker
 
 # Убедитесь, что вы находитесь в правильном окружении Django
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'crpetxls.settings')
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'carpetxls.settings')
 django.setup()
 
 from clients.models import Client  # Замените 'your_app_name' на имя вашего приложения

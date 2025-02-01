@@ -12,23 +12,15 @@ from orders.models import Stage  # Import the Stage model
 def calculate_totals(records):
     totals = {
         'area': decimal.Decimal('0.0'),
-        'additional_product_area': decimal.Decimal('0.0'),
         'additional_product_price': decimal.Decimal('0.0'),
-        'overlock': decimal.Decimal('0.0'),
-        'allowance': decimal.Decimal('0.0')
     }
 
     for record in records:
         if record.area:
             totals['area'] += record.area
-        if record.additional_product_area:
-            totals['additional_product_area'] += record.additional_product_area
         if record.additional_product_price:
             totals['additional_product_price'] += record.additional_product_price
-        if record.overlock:
-            totals['overlock'] += record.overlock
-        if record.allowance:
-            totals['allowance'] += record.allowance
+
 
     return totals
 
@@ -42,31 +34,23 @@ def group_records_by_fields(records):
             record.product_name,
             record.additional_product_name,
             record.additional_product_price,
-            record.overlock,
-            record.allowance
+
         )
 
         if key not in grouped_records:
             grouped_records[key] = {
                 'count': 0,
                 'total_area': decimal.Decimal('0.0'),
-                'total_additional_product_area': decimal.Decimal('0.0'),
                 'total_additional_product_price': decimal.Decimal('0.0'),
-                'total_overlock': decimal.Decimal('0.0'),
-                'total_allowance': decimal.Decimal('0.0')
+
             }
 
         grouped_records[key]['count'] += 1
         if record.area:
             grouped_records[key]['total_area'] += record.area
-        if record.additional_product_area:
-            grouped_records[key]['total_additional_product_area'] += record.additional_product_area
         if record.additional_product_price:
             grouped_records[key]['total_additional_product_price'] += record.additional_product_price
-        if record.overlock:
-            grouped_records[key]['total_overlock'] += record.overlock
-        if record.allowance:
-            grouped_records[key]['total_allowance'] += record.allowance
+
 
     return grouped_records
 
