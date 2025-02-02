@@ -8,7 +8,7 @@ from .views import payroll_summary
 from django.urls import reverse
 
 class PayrollAdminSite(admin.AdminSite):
-    site_header = "Payroll Administration"
+
 
     def get_urls(self):
         urls = super().get_urls()
@@ -39,6 +39,7 @@ class PayrollRecordAdmin(admin.ModelAdmin):
             path('payroll-summary/', self.admin_site.admin_view(self.payroll_summary_redirect), name='payroll-summary-redirect'),
         ]
         return custom_urls + urls
+
 
     def payroll_summary_redirect(self, request):
         # Перенаправляем на страницу сводки зарплат

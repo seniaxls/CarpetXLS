@@ -7,10 +7,23 @@ from django.db.models.signals import pre_save, post_save, post_init, pre_init, m
 from django.dispatch import receiver
 from django import utils
 from clients.models import Client
+from django.contrib.auth.models import Group
+from django.core.exceptions import PermissionDenied
 
+from django.db import models
+from django.contrib.auth.models import User
+from django.core.exceptions import PermissionDenied
+from django.utils import timezone
 
 
 class ProductUnit(models.Model):
+    SIZE_TYPES = (
+        (0, "Штуки", "шт"),
+        (11, "Килограмм", "кг"),
+        (20, "Сантиметр", "см"),
+        (22, "Метр", "м"),
+        (32, "Квадратный метр", "м²"),
+    )
 
     size_numb = models.IntegerField(verbose_name='ID', default=0, blank=True)
     size_name = models.CharField(max_length=20, default="Штуки", blank=True)
@@ -66,54 +79,184 @@ class ProductAdd(models.Model):
         return "{} ({}₽{})".format(self.product_name,self.product_price, self.product_unit.size_name_short)
 
 class Stage(models.Model):
-    name = models.CharField(max_length=30)
-    first_message = models.TextField(default=None, verbose_name='Сообщение', blank=True, null=True)
-    second_message = models.TextField(default=None, verbose_name='Сообщение 2', blank=True, null=True)
-    group_stage = models.IntegerField(default=0)
-    super_stage = models.BooleanField(default=False,editable=True)
+    STAGE_TYPES = (
+        ('Лид', 1, False),
+        ('Нужен вывоз', 1, False),
+        ('Отменен', 1, False),
+        ('Курьер забрал', 1, False),
+        ('Принят в цех', 1, True),
+        ('Грязный-Склад', 2, True),
+        ('Выбивание', 3, True),
+        ('Стирка', 4, True),
+        ('Финишка', 5, True),
+        ('Нужен оверлок', 6, False),
+        ('Чистый-Склад', 6, True),
+        ('Нужна доставка', 7, False),
+        ('Везем клиенту', 7, False),
+        ('Выполнен', 7, True),
+        ('Возврат', 8, True),
+        ('Вывоз возврата', 8, True),
+        ('Везем возврат', 8, True),
+        ('Сброс', 9, True),
+    )
 
-    class Meta:
-        verbose_name = 'Статус'
-        verbose_name_plural = "Статусы"
-
+    name = models.CharField(max_length=50, unique=True, verbose_name="Название этапа")
+    group_stage = models.PositiveIntegerField(verbose_name="Группа этапов", help_text="Номер группы, к которой относится этап")
+    super_stage = models.BooleanField(default=False, verbose_name="Супер-этап")
+    first_message = models.TextField(blank=True, null=True, verbose_name="Сообщение")
+    second_message = models.TextField(blank=True, null=True, verbose_name="Сообщение 2")
 
     def __str__(self):
         return self.name
 
+    class Meta:
+        verbose_name = "Этап"
+        verbose_name_plural = "Этапы"
+        ordering = ['id']  # Сортировка по PK (id) от меньшего к большему
+
 class Order(models.Model):
     order_number = models.CharField(max_length=10, editable=False, verbose_name='Номер заказа')
-    stage = models.ForeignKey(Stage, models.SET_NULL, null=True, verbose_name='Статус', default=5 )
+    stage = models.ForeignKey(
+        Stage,
+        on_delete=models.PROTECT,
+        related_name='orders',
+        verbose_name="Этап заказа",
+        null=True,  # Разрешаем NULL
+        blank=True  # Разрешаем пустой выбор
+    )
     check_call = models.BooleanField(default=False, verbose_name="Позвонить")
-    check_stage_hide = models.IntegerField(default=1)
     client = models.ForeignKey(Client, models.SET_NULL, blank=True, null=True, verbose_name='Клиент')
     target_date = models.DateField(blank=True, null=True, verbose_name='Целевая дата')
     order_sum = models.DecimalField(default=0, verbose_name='Сумма заказа', decimal_places=2, max_digits=7)
     comment = models.TextField(default=None, verbose_name='Комментарий', blank=True)
-    create_date = models.DateField(auto_created=True, auto_now_add=True, verbose_name='Дата создания')
+    create_date = models.DateField(auto_now_add=True, verbose_name='Дата создания')
     user = models.ForeignKey(User, on_delete=models.CASCADE, default=0)
-    create_date_time = models.DateTimeField(auto_created=True, verbose_name='Дата время создания',
-                                            default=utils.timezone.now)
-
-    def save(self, *args, **kwargs):
-
-        if self.id is None:
-            numb = Order.objects.all().last()
-            if numb is not None:
-                numb = numb.id + 1
-                numb = "000" + str(numb)
-            else:
-                numb = "001"
-            self.order_number = numb[-3::]
-        super(Order, self).save(*args, **kwargs)
-
-    class Meta:
-        verbose_name = 'Заказ'
-        verbose_name_plural = 'Заказы'
+    created_at = models.DateTimeField(verbose_name="Дата создания", auto_now_add=True)
+    updated_at = models.DateTimeField(verbose_name="Дата обновления", auto_now=True)
+    create_date_time = models.DateTimeField(auto_created=True, verbose_name='Дата время создания', default=timezone.now)
 
     def __str__(self):
-        return str(self.order_number)
+        return f"Заказ #{self.order_number or 'Без номера'}"
+
+    class Meta:
+        verbose_name = "Заказ"
+        verbose_name_plural = "Заказы"
+
+    @staticmethod
+    def get_available_stages(user, obj=None):
+        # Определяем разрешенные этапы для пользователя
+        accessible_stage_ids = set(GroupStagePermission.get_accessible_stages(user))
+        if obj is None:
+            # При создании нового заказа доступна только первая группа этапов
+            return Stage.objects.filter(group_stage=1, id__in=accessible_stage_ids)
+        current_stage = obj.stage
+        # Добавляем текущий этап в список доступных
+        available_stage_ids = {current_stage.id}
+        # Определяем текущую группу этапов
+        current_group = current_stage.group_stage
+        # Если текущий этап является супер-этапом, добавляем этапы из следующей группы
+        if current_stage.super_stage:
+            next_group = current_group + 1
+            next_group_stages = Stage.objects.filter(group_stage=next_group, id__in=accessible_stage_ids)
+            available_stage_ids.update(next_group_stages.values_list('id', flat=True))
+        else:
+            # Иначе добавляем все этапы из текущей группы
+            current_group_stages = Stage.objects.filter(group_stage=current_group, id__in=accessible_stage_ids)
+            available_stage_ids.update(current_group_stages.values_list('id', flat=True))
+        # Для суперпользователя доступны все этапы, но они остаются организованными по группам
+        if user.is_superuser:
+            return Stage.objects.filter(id__in=available_stage_ids)
+        return Stage.objects.filter(id__in=available_stage_ids)
+
+    def save(self, *args, **kwargs):
+        # Автоматическая генерация номера заказа
+        if not self.order_number:
+            last_order = Order.objects.all().last()
+            self.order_number = f"{(last_order.id + 1):03d}" if last_order else "001"
+
+        # Проверяем, имеет ли пользователь право на выбранный этап
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+        user = kwargs.pop('user', None) or getattr(self, '_user', None)
+        if user and not user.is_superuser:
+            accessible_stage_ids = set(GroupStagePermission.get_accessible_stages(user))
+            if self.stage_id and self.stage_id not in accessible_stage_ids:
+                raise PermissionDenied(f"У вас нет прав на установку этапа '{self.stage.name}'.")
+
+        # Автоматическое изменение этапа с 'Сброс' на 'Принят в цех'
+        reset_stage = Stage.objects.filter(name='Сброс').first()
+        accepted_in_workshop_stage = Stage.objects.filter(name='Принят в цех').first()
+        if reset_stage and accepted_in_workshop_stage and self.stage == reset_stage:
+            self.stage = accepted_in_workshop_stage
+            print("Этап заказа автоматически изменен с 'Сброс' на 'Принят в цех'.")
+
+        # Автоматическая установка флага 'Позвонить' для определённых этапов
+        stages_with_check_call = Stage.objects.filter(
+            name__in=['Нужен вывоз', 'Чистый-Склад', 'Нужна доставка', 'Вывоз возврата']
+        ).values_list('id', flat=True)
+
+        # Проверяем, был ли флаг check_call изменён вручную
+        if self.stage_id in stages_with_check_call:
+            # Устанавливаем флаг только если он не был снят вручную
+            if not hasattr(self, '_manual_check_call_change'):
+                self.check_call = True
+                print(f"Флаг 'Позвонить' автоматически установлен для этапа '{self.stage.name}'.")
+        elif self.stage and self.stage.name not in ['Нужен вывоз', 'Чистый-Склад', 'Нужна доставка', 'Вывоз возврата']:
+            # Сбрасываем флаг, если этап изменился на другой
+            if not hasattr(self, '_manual_check_call_change'):
+                self.check_call = False
+
+        super().save(*args, **kwargs)
+
+class GroupStagePermission(models.Model):
+    group = models.ForeignKey(Group, on_delete=models.CASCADE, verbose_name="Группа пользователей")
+    stages = models.ManyToManyField(Stage, related_name='group_permissions', verbose_name="Доступные этапы")
+    days_limit = models.PositiveIntegerField(
+        default=30,
+        verbose_name="Количество последних дней",
+        help_text="Количество дней, за которые будут выводиться заказы. 0 = без ограничений."
+    )
+
+    def __str__(self):
+        return f"{self.group.name} - {', '.join([stage.name for stage in self.stages.all()])}"
+
+    class Meta:
+        verbose_name = "Разрешение на этапы"
+        verbose_name_plural = "Разрешения на этапы"
+
+    @staticmethod
+    def get_accessible_stages(user):
+        """
+        Возвращает список ID этапов, доступных для пользователя.
+        """
+        if user.is_superuser:
+            # Суперпользователь видит все этапы
+            return Stage.objects.values_list('id', flat=True)
+
+        group_ids = user.groups.values_list('id', flat=True)
+        accessible_stages = GroupStagePermission.objects.filter(group_id__in=group_ids).values_list('stages', flat=True)
+        return list(accessible_stages)
+
+    @staticmethod
+    def get_days_limit(user):
+        """
+        Возвращает количество дней для фильтрации заказов.
+        Если days_limit=0, возвращается None (без ограничений).
+        """
+        if user.is_superuser:
+            # Суперпользователь видит все заказы без ограничений
+            return None
+
+        group_ids = user.groups.values_list('id', flat=True)
+        permissions = GroupStagePermission.objects.filter(group_id__in=group_ids)
+        if permissions.exists():
+            # Берем минимальное значение days_limit среди всех разрешений пользователя
+            days_limit = min(permission.days_limit for permission in permissions)
+            return None if days_limit == 0 else days_limit
+        return 30  # Значение по умолчанию
 
 class ProductOrder(models.Model):
+    message = models.TextField(verbose_name='Сообщение', blank=True)
     order_id = models.ForeignKey(Order, on_delete=models.CASCADE, verbose_name='Заказ', related_name='product_order')
     product = models.ForeignKey(Product, on_delete=models.CASCADE, default=None, verbose_name='Наименование')
     width = models.DecimalField(max_digits=4, decimal_places=2, default=1, verbose_name='Ширина', validators=[MaxValueValidator(19), MinValueValidator(0.1)])
@@ -122,7 +265,7 @@ class ProductOrder(models.Model):
     overlock = models.DecimalField(max_digits=5, decimal_places=2,validators=[MaxValueValidator(9999), MinValueValidator(0)], default=None, verbose_name='Оверлок', blank=True, null=True)
     allowance = models.DecimalField(max_digits=5, decimal_places=2,validators=[MaxValueValidator(9999), MinValueValidator(0)], default=None, verbose_name='Надбавка', blank=True, null=True)
     comment = models.TextField( verbose_name='Комментарий', blank=True)
-    message = models.TextField(verbose_name='Сообщение', blank=True)
+
 
     def update_message(self):
         self.message = ''
@@ -247,10 +390,6 @@ def handle_product_order_pre_save(sender, instance, **kwargs):
     instance.update_message()
 
 
-@receiver(pre_save, sender=Order )
-def check_stage(sender, instance, **kwargs):
-    if instance.stage.group_stage and instance.stage.super_stage:
-        instance.check_stage_hide = (instance.stage.group_stage % 8) + 1
 
 
 @receiver(pre_save, sender=Order)
@@ -283,47 +422,4 @@ def calculate_order_sum(sender, instance, **kwargs):
         instance.order_sum += data.product.product_price * data.second_amount
 
 
-@receiver(post_save, sender=ProductUnit)
-def create_unit(sender, instance, created, **kwargs):
-    SIZE_TYPES = (
-        (0, "Штуки", "шт"),
-        (11, "Килограмм", "кг"),
-        (20, "Сантиметр", "см"),
-        (22, "Метр", "м"),
-        (32, "Квадратный метр", "м²"),
-    )
 
-    if created:
-        ProductUnit.objects.all().delete()
-        cards = (ProductUnit(size_numb=card_type[0], id=index + 1, size_name=card_type[1], size_name_short=card_type[2]) for index, card_type in enumerate(SIZE_TYPES))
-        ProductUnit.objects.bulk_create(cards)
-
-
-@receiver(post_save, sender=Stage)
-def create_stage(sender, instance, created, **kwargs):
-    STAGE_TYPES = (
-        ('Лид', 1, False),
-        ('Нужен вывоз', 1, False),
-        ('Отменен', 1, False),
-        ('Курьер забрал', 1, False),
-        ('Принят в цех', 1, True),
-        ('Грязный-Склад', 2, True),
-        ('Выбивание', 3, True),
-        ('Стирка', 4, True),
-        ('Финишка', 5, True),
-        ('Нужен оверлок', 6, False),
-        ('Чистый-Склад', 6, True),
-        ('Нужна доставка', 7, False),
-        ('Везем клиенту', 7, False),
-        ('Выполнен', 7, True),
-        ('Возврат', 8, True),
-        ('Вывоз возврата', 8, True),
-        ('Везем возврат', 8, True),
-        ('Сброс', 9, True),
-
-    )
-    if created:
-        Stage.objects.all().delete()
-        cards = (Stage(name=card_type[0], id=index + 1, group_stage=card_type[1],
-                       super_stage=card_type[2]) for index, card_type in enumerate(STAGE_TYPES))
-        Stage.objects.bulk_create(cards)
