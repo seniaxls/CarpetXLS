@@ -84,7 +84,7 @@ def payroll_summary(request):
         if user:
             query = query.filter(user=user)
         if start_date and end_date:
-            query = query.filter(order__create_date_time__range=(start_date, end_date))
+            query = query.filter(order__created_at__range=(start_date, end_date))
         if status:
             query = query.filter(status=status.name)
         if product_name:

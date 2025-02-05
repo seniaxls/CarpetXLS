@@ -79,6 +79,7 @@ def create_orders(num_orders=10):
             )
 
             # Выбираем от 0 до 2 случайных доп. услуг
+
             num_product_adds = random.randint(0, 2)
             selected_product_adds = random.sample(product_adds, num_product_adds) if num_product_adds > 0 else []
             set_product_add(product_order, selected_product_adds)
@@ -120,4 +121,4 @@ def set_product_add(instance, product_add_list):
 
 if __name__ == "__main__":
     # Убедитесь, что у вас есть данные в базе данных для Client, Product, ProductAdd, Stage и SecondProduct
-    create_orders(num_orders=1000)  # Например, создаем 10 заказов
+    create_orders(num_orders=100)  # Например, создаем 10 заказов

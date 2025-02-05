@@ -1,4 +1,4 @@
-
+from simple_history.models import HistoricalRecords
 from django.core.validators import MaxValueValidator
 from django.core.validators import MinValueValidator
 from django.db import models
@@ -122,18 +122,19 @@ class Order(models.Model):
         related_name='orders',
         verbose_name="Этап заказа",
         null=True,  # Разрешаем NULL
-        blank=True  # Разрешаем пустой выбор
-    )
+        blank=True,  # Разрешаем пустой выбор
+        default=5
+)
     check_call = models.BooleanField(default=False, verbose_name="Позвонить")
-    client = models.ForeignKey(Client, models.SET_NULL, blank=True, null=True, verbose_name='Клиент')
-    target_date = models.DateField(blank=True, null=True, verbose_name='Целевая дата')
+    client = models.ForeignKey(Client, models.SET_NULL, blank=False, null=True, verbose_name='Клиент')
     order_sum = models.DecimalField(default=0, verbose_name='Сумма заказа', decimal_places=2, max_digits=7)
     comment = models.TextField(default=None, verbose_name='Комментарий', blank=True)
     create_date = models.DateField(auto_now_add=True, verbose_name='Дата создания')
     user = models.ForeignKey(User, on_delete=models.CASCADE, default=0)
     created_at = models.DateTimeField(verbose_name="Дата создания", auto_now_add=True)
     updated_at = models.DateTimeField(verbose_name="Дата обновления", auto_now=True)
-    create_date_time = models.DateTimeField(auto_created=True, verbose_name='Дата время создания', default=timezone.now)
+    target_date = models.DateField(blank=True, null=True, verbose_name='Целевая дата')
+    history = HistoricalRecords()  # Добавляем поле для отслеживания истории
 
     def __str__(self):
         return f"Заказ #{self.order_number or 'Без номера'}"
@@ -265,7 +266,8 @@ class ProductOrder(models.Model):
     overlock = models.DecimalField(max_digits=5, decimal_places=2,validators=[MaxValueValidator(9999), MinValueValidator(0)], default=None, verbose_name='Оверлок', blank=True, null=True)
     allowance = models.DecimalField(max_digits=5, decimal_places=2,validators=[MaxValueValidator(9999), MinValueValidator(0)], default=None, verbose_name='Надбавка', blank=True, null=True)
     comment = models.TextField( verbose_name='Комментарий', blank=True)
-
+    history_user = models.ForeignKey(User, on_delete=models.CASCADE, null=True,)
+    history = HistoricalRecords()
 
     def update_message(self):
         self.message = ''
@@ -346,16 +348,17 @@ class MessageProductOrder(models.Model):
     message = models.TextField(verbose_name='Наименование', blank=True,)
 
 class SecondProductOrder(models.Model):
-    order_id = models.ForeignKey(Order, on_delete=models.CASCADE, verbose_name='Заказ')
+    order_id = models.ForeignKey(Order, on_delete=models.CASCADE, verbose_name='Заказ', related_name='second_product_orders')
     product = models.ForeignKey(SecondProduct, verbose_name='Наименование', default=None, on_delete=models.CASCADE)
     second_amount = models.DecimalField(max_digits=4, decimal_places=2, default=1, verbose_name='Кол-во',validators=[MaxValueValidator(99), MinValueValidator(0)])
-
+    history_user = models.ForeignKey(User, on_delete=models.CASCADE,null=True,)
+    history = HistoricalRecords()
     def __str__(self):
         return ""
 
     class Meta:
-        verbose_name = 'Стирка'
-        verbose_name_plural = 'Стирка'
+        verbose_name = 'Допы'
+        verbose_name_plural = 'Допы'
 
 
 
