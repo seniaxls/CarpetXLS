@@ -1,4 +1,4 @@
-
+from simple_history.utils import get_history_manager_for_model
 from django.db.models.signals import post_save, pre_save
 from django.dispatch import receiver
 from orders.models import Order, ProductOrder, ProductAdd
@@ -44,8 +44,10 @@ def handle_order_status_change(sender, instance, **kwargs):
     if instance.stage.name not in statuses_to_track:
         return
 
-    # Get the user who made the change (assuming you have a way to track this)
-    user = instance.user
+    history_manager = get_history_manager_for_model(Order)
+    latest_history = history_manager.filter(id=instance.id).first()
+    user = latest_history.history_user if latest_history else None
+
     for product_order in instance.product_order.all():
         area = calculate_product_area(product_order)
         if instance.stage.name == 'Грязный-Склад':

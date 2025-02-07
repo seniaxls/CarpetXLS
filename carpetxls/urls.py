@@ -4,6 +4,7 @@ from django.conf.urls.static import static
 from django.conf import settings
 from django.shortcuts import redirect  # Импортируем функцию redirect
 
+
 urlpatterns = [
     # Перенаправление с корня сайта на /admin
     path('', lambda request: redirect('admin:index'), name='home'),
@@ -13,6 +14,10 @@ urlpatterns = [
 
     # Подключение маршрутов приложения payroll
     path('payroll/', include('payroll.urls')),  # Маршруты payroll
+
+
+
+
 ]
 
 # Добавление статических файлов только в режиме разработки

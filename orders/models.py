@@ -1,3 +1,4 @@
+from django.db.models import Model
 from simple_history.models import HistoricalRecords
 from django.core.validators import MaxValueValidator
 from django.core.validators import MinValueValidator
@@ -10,8 +11,10 @@ from clients.models import Client
 from django.contrib.auth.models import Group
 from django.core.exceptions import PermissionDenied
 
+
 from django.db import models
 from django.contrib.auth.models import User
+
 from django.core.exceptions import PermissionDenied
 from django.utils import timezone
 
@@ -36,47 +39,55 @@ class ProductUnit(models.Model):
     def __str__(self):
         return '{}'.format(self.size_name)
 
-class SecondProduct(models.Model):
-    product_name = models.CharField(max_length=100, verbose_name='Название услуги', default="Стирка пледа")
-    product_long_name = models.CharField(max_length=100, verbose_name='Название услуги', default="Стирка пледа")
-    product_unit = models.ForeignKey(ProductUnit, models.SET_NULL, null=True, verbose_name='Единица измерения', default=1  )
+
+
+class BaseProduct(models.Model):
+    product_name = models.CharField(max_length=100, verbose_name='Название услуги', default="Услуга")
+    product_long_name = models.CharField(max_length=100, verbose_name='Полное название услуги', default="Услуга")
+    product_unit = models.ForeignKey('ProductUnit', models.SET_NULL, null=True, verbose_name='Единица измерения', default=1)
     product_price = models.IntegerField(verbose_name='Цена', default=100)
     min_amount = models.DecimalField(max_digits=3, decimal_places=1, default=1, verbose_name='Минимальное Кол-во')
 
+    class Meta:
+        abstract = True  # Это делает модель абстрактной, она не будет создавать таблицу в БД
+
+    def __str__(self):
+        if hasattr(self, 'product_price') and self.product_price == 0:
+            return "{}".format(self.product_name)
+        return "{} ({}₽{})".format(self.product_name, self.product_price, self.product_unit.size_name_short)
+
+class SecondProduct(BaseProduct):
     class Meta:
         verbose_name = 'Услуги стирки'
         verbose_name_plural = 'Услуги стирки'
 
-    def __str__(self):
-        return "{} ({}₽{})".format(self.product_name,self.product_price, self.product_unit.size_name_short)
-
-class Product(models.Model):
-    product_name = models.CharField(max_length=100, verbose_name='Название услуги', default="Короткий ворс")
-    product_long_name = models.CharField(max_length=100, verbose_name='Название услуги', default="Короткий ворс")
-    product_unit = models.ForeignKey(ProductUnit, models.SET_NULL, null=True, verbose_name='Единица измерения', default=1  )
-    product_price = models.IntegerField(verbose_name='Цена', default=150)
-    min_amount = models.DecimalField(max_digits=3, decimal_places=1, default=1, verbose_name='Минимальное Кол-во')
-
+class Product(BaseProduct):
     class Meta:
         verbose_name = 'Услуги стирки ковров'
         verbose_name_plural = 'Услуги стирки ковров'
 
-    def __str__(self):
-        return "{} ({}₽{})".format(self.product_name,self.product_price, self.product_unit.size_name_short)
 
-class ProductAdd(models.Model):
-    product_name = models.CharField(max_length=100, verbose_name='Название услуги', default="Запах")
-    product_long_name = models.CharField(max_length=100, verbose_name='Название услуги', default="Запах")
-    product_unit = models.ForeignKey(ProductUnit, models.SET_NULL, null=True, verbose_name='Единица измерения', default=1  )
-    product_price = models.IntegerField(verbose_name='Цена', default=100)
-    min_amount = models.DecimalField(max_digits=3, decimal_places=1, default=1, verbose_name='Минимальное Кол-во')
 
+class ProductAdd(BaseProduct):
+    SERVICE_TYPE_CHOICES = [
+        ('usual', 'Обычная услуга'),
+        ('overlock', 'Оверлок'),
+        ('additional', 'Дополнительная услуга'),
+    ]
+
+    service_type = models.CharField(
+        max_length=20,
+        choices=SERVICE_TYPE_CHOICES,
+        default='usual',
+        verbose_name='Тип услуги'
+    )
     class Meta:
         verbose_name = 'Доп услуги стирки ковров'
         verbose_name_plural = 'Доп услуги стирки ковров'
 
-    def __str__(self):
-        return "{} ({}₽{})".format(self.product_name,self.product_price, self.product_unit.size_name_short)
+
+
+
 
 class Stage(models.Model):
     STAGE_TYPES = (
@@ -88,8 +99,8 @@ class Stage(models.Model):
         ('Грязный-Склад', 2, True),
         ('Выбивание', 3, True),
         ('Стирка', 4, True),
+        ('Нужен оверлок', 5, False),
         ('Финишка', 5, True),
-        ('Нужен оверлок', 6, False),
         ('Чистый-Склад', 6, True),
         ('Нужна доставка', 7, False),
         ('Везем клиенту', 7, False),
@@ -130,11 +141,12 @@ class Order(models.Model):
     order_sum = models.DecimalField(default=0, verbose_name='Сумма заказа', decimal_places=2, max_digits=7)
     comment = models.TextField(default=None, verbose_name='Комментарий', blank=True)
     create_date = models.DateField(auto_now_add=True, verbose_name='Дата создания')
-    user = models.ForeignKey(User, on_delete=models.CASCADE, default=0)
+
     created_at = models.DateTimeField(verbose_name="Дата создания", auto_now_add=True)
     updated_at = models.DateTimeField(verbose_name="Дата обновления", auto_now=True)
     target_date = models.DateField(blank=True, null=True, verbose_name='Целевая дата')
     history = HistoricalRecords()  # Добавляем поле для отслеживания истории
+
 
     def __str__(self):
         return f"Заказ #{self.order_number or 'Без номера'}"
@@ -202,10 +214,7 @@ class Order(models.Model):
             if not hasattr(self, '_manual_check_call_change'):
                 self.check_call = True
                 print(f"Флаг 'Позвонить' автоматически установлен для этапа '{self.stage.name}'.")
-        elif self.stage and self.stage.name not in ['Нужен вывоз', 'Чистый-Склад', 'Нужна доставка', 'Вывоз возврата']:
-            # Сбрасываем флаг, если этап изменился на другой
-            if not hasattr(self, '_manual_check_call_change'):
-                self.check_call = False
+
 
         super().save(*args, **kwargs)
 
@@ -256,6 +265,8 @@ class GroupStagePermission(models.Model):
             return None if days_limit == 0 else days_limit
         return 30  # Значение по умолчанию
 
+
+
 class ProductOrder(models.Model):
     message = models.TextField(verbose_name='Сообщение', blank=True)
     order_id = models.ForeignKey(Order, on_delete=models.CASCADE, verbose_name='Заказ', related_name='product_order')
@@ -263,11 +274,13 @@ class ProductOrder(models.Model):
     width = models.DecimalField(max_digits=4, decimal_places=2, default=1, verbose_name='Ширина', validators=[MaxValueValidator(19), MinValueValidator(0.1)])
     height = models.DecimalField(max_digits=4, decimal_places=2, default=1, verbose_name='Длина', validators=[MaxValueValidator(19), MinValueValidator(0.1)])
     product_add = models.ManyToManyField(ProductAdd, default=None, blank=True, verbose_name='Доп услуги',related_name='product_add')
-    overlock = models.DecimalField(max_digits=5, decimal_places=2,validators=[MaxValueValidator(9999), MinValueValidator(0)], default=None, verbose_name='Оверлок', blank=True, null=True)
-    allowance = models.DecimalField(max_digits=5, decimal_places=2,validators=[MaxValueValidator(9999), MinValueValidator(0)], default=None, verbose_name='Надбавка', blank=True, null=True)
+    overlock = models.DecimalField(max_digits=5, decimal_places=2,validators=[MaxValueValidator(9999), MinValueValidator(0)], default=0, verbose_name='Оверлок', blank=True, null=True)
+    allowance = models.DecimalField(max_digits=5, decimal_places=2,validators=[MaxValueValidator(9999), MinValueValidator(0)], default=0, verbose_name='Надбавка', blank=True, null=True)
     comment = models.TextField( verbose_name='Комментарий', blank=True)
     history_user = models.ForeignKey(User, on_delete=models.CASCADE, null=True,)
     history = HistoricalRecords()
+
+
 
     def update_message(self):
         self.message = ''
@@ -289,32 +302,32 @@ class ProductOrder(models.Model):
 
         # Обработка дополнительных продуктов
 
-
-
         # Обработка оверлока
-        if self.overlock is not None:
+        if self.overlock > 0:
             total_sum += float(self.overlock)
             message_lines.append(f"Оверлок: {'%.0f' % self.overlock}₽")
 
         # Обработка доплаты
-        if self.allowance is not None:
+        if self.allowance > 0:
             total_sum += float(self.allowance)
             message_lines.append(f"Дополнительно: {'%.0f' % self.allowance}₽")
 
         # Итоговая сумма
 
-
         # Обновляем поле message, если объект уже сохранен в базе данных
         if self.pk:
             for additional_product in self.product_add.all():
-                if additional_product.product_unit.size_numb == 32:
-                    additional_price = area * additional_product.product_price
-                    total_sum += additional_price
-                    message_lines.append(f"{additional_product.product_name}: {'%.0f' % additional_price}₽")
-                elif additional_product.product_unit.size_numb == 0:
-                    additional_price = additional_product.product_price
-                    total_sum += additional_price
-                    message_lines.append(f"{additional_product.product_name}: {'%.0f' % additional_price}₽")
+                if additional_product.product_price > 0:
+                    if additional_product.product_unit.size_numb == 32:
+                        additional_price = area * additional_product.product_price
+                        total_sum += additional_price
+                        message_lines.append(f"{additional_product.product_name}: {'%.0f' % additional_price}₽")
+                    elif additional_product.product_unit.size_numb == 0:
+                        additional_price = additional_product.product_price
+                        total_sum += additional_price
+                        message_lines.append(f"{additional_product.product_name}: {'%.0f' % additional_price}₽")
+
+
 
             message_lines.append(f"Итого: {'%.0f' % total_sum}₽")
             # Соединяем все строки в одно сообщение
@@ -362,12 +375,7 @@ class SecondProductOrder(models.Model):
 
 
 
-@receiver(pre_save, sender=ProductOrder)
-def calc_amount(sender, instance, **kwargs):
-    if instance.overlock == None:
-        instance.overlock = 0
-    if instance.allowance == None:
-        instance.allowance = 0
+
 
 def set_product_add(instance, product_add_list):
     if instance.pk is None:
@@ -387,10 +395,14 @@ def handle_product_add_m2m_change(sender, instance, action, **kwargs):
         instance.update_message()
         instance.save()
 
+
 # Регистрация сигнала pre_save для модели ProductOrder
 @receiver(pre_save, sender=ProductOrder)
 def handle_product_order_pre_save(sender, instance, **kwargs):
     instance.update_message()
+
+
+
 
 
 

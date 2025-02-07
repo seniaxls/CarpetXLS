@@ -1,17 +1,54 @@
 from extra_settings.models import Setting
 from django.utils.timezone import localtime
 from simple_history.admin import SimpleHistoryAdmin
+from user_agents import parse
 from django.shortcuts import render, redirect
-import decimal
 from django.utils.html import format_html
 from django.contrib import admin
 from django.utils.translation import gettext_lazy as _
 from .models import *
-from django.urls import reverse
+
+from django import forms
+
+from django.utils.safestring import mark_safe
+
+
+class ProductAddReadonlyWidget(forms.Widget):
+    """Кастомный виджет для отображения product_add в виде списка."""
+
+    def render(self, name, value, attrs=None, renderer=None):
+        if not value:
+            return mark_safe("")
+
+        # Получаем связанные объекты ProductAdd
+        product_adds = ProductAdd.objects.filter(id__in=value)
+        items = "".join(f"<li><b>{p.product_name}</b></li>" for p in product_adds)
+        return mark_safe(f"<ul>{items}</ul>")
+
+
+class ProductOrderForm(forms.ModelForm):
+    class Meta:
+        model = ProductOrder
+        fields = '__all__'
+        widgets = {
+            'product_add': forms.CheckboxSelectMultiple(),  # Стандартный виджет для редактирования
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        obj = kwargs.get('instance')  # Получаем текущий объект
+        if obj and hasattr(obj, 'order_id') and obj.order_id and hasattr(obj.order_id, 'stage'):
+            if obj.order_id.stage.group_stage >= 2:
+                # Если group_stage >= 2, делаем product_add доступным только для чтения
+                if 'product_add' in self.fields:  # Проверяем наличие поля
+                    self.fields['product_add'].widget = ProductAddReadonlyWidget()
+                    self.fields['product_add'].required = False
+                    self.fields['product_add'].disabled = True
 
 
 class ProductOrderInline(admin.TabularInline):
     model = ProductOrder
+    form = ProductOrderForm  # Подключаем кастомную форму
     template = "admin/orders/Order/myinline.html"
     classes = ['collapse']
     fields = ['message', 'width', 'height', 'product_add', 'overlock', 'allowance', 'comment']
@@ -22,10 +59,20 @@ class ProductOrderInline(admin.TabularInline):
             return False
         return super().has_add_permission(request, obj)
 
+    def has_delete_permission(self, request, obj=None):
+        if obj and hasattr(obj, 'stage') and obj.stage.group_stage >= 2:
+            return False
+        return super().has_add_permission(request, obj)
+
+
+
     def get_fields(self, request, obj=None):
-        fields = ['product', 'width', 'height', 'product_add', 'overlock', 'allowance', 'comment']
-        if obj and obj.stage and obj.stage.group_stage >= 2:
-            fields = ('message', 'overlock', 'allowance', 'comment')
+        fields = ['product', 'width', 'height', 'product_add', 'comment']
+        if  obj and obj.stage and 6 > obj.stage.group_stage >= 2:
+            fields = ('message', 'overlock', 'allowance', 'product_add', 'comment')
+        elif obj and obj.stage and obj.stage.group_stage >= 6:
+            fields = ('message', 'product_add', 'comment')
+
         return fields
 
     def get_extra(self, request, obj=None, **kwargs):
@@ -33,6 +80,26 @@ class ProductOrderInline(admin.TabularInline):
         if obj and ProductOrder.objects.filter(order_id=obj.id).exists():
             extra = 0
         return extra
+
+    def get_formset(self, request, obj=None, **kwargs):
+        """
+        Переопределяем метод get_formset для передачи дополнительных данных в форму.
+        """
+        user_agent = parse(request.META.get('HTTP_USER_AGENT', ''))
+        request.is_mobile = user_agent.is_mobile
+
+        if request.is_mobile:
+            self.form.base_fields['product_add'].widget = forms.SelectMultiple()
+        else:
+            self.form.base_fields['product_add'].widget = forms.CheckboxSelectMultiple()
+
+        # Если group_stage >= 2, делаем product_add доступным только для чтения
+        if obj and hasattr(obj, 'stage') and obj.stage.group_stage >= 2:
+            self.form.base_fields['product_add'].widget = ProductAddReadonlyWidget()
+            self.form.base_fields['product_add'].required = False
+            self.form.base_fields['product_add'].disabled = True
+
+        return super().get_formset(request, obj, **kwargs)
 
 
 class SecondProductOrderInline(admin.TabularInline):
@@ -48,6 +115,11 @@ class SecondProductOrderInline(admin.TabularInline):
         if obj and SecondProductOrder.objects.filter(order_id=obj.id).exists():
             extra = 0
         return extra
+
+    def has_change_permission(self, request, obj=None):
+        if obj and hasattr(obj, 'stage') and obj.stage.group_stage >= 7:
+            return False
+        return super().has_add_permission(request, obj)
 
 
 @admin.register(GroupStagePermission)
@@ -149,15 +221,207 @@ class OrderAdmin(SimpleHistoryAdmin):
     autocomplete_fields = ['client']
     search_fields = ['client__fio', 'id', 'order_sum', 'order_number', 'client__address', 'client__phone_number']
     list_display = (
-        'order_number', 'client', 'client_phone_number', 'check_call', 'order_sum', 'stage', 'formatted_created_at',
+        'order_number_with_conditions', 'client', 'client_phone_number', 'check_call', 'order_sum', 'stage',
+        'formatted_created_at',
         'formatted_updated_at', 'formatted_target_date'
     )
     list_display_links = (
-        'order_number', 'client', 'client_phone_number', 'order_sum', 'stage'
+        'order_number_with_conditions', 'client', 'client_phone_number', 'order_sum', 'stage'
     )
     list_filter = (CreateDateFilter, UpdateDateFilter, CheckCallFilter, StageFilter)
     list_editable = ['check_call']
     change_form_template = "admin/orders/Order/change_form.html"
+
+    class Media:
+        css = {
+            'all': ('css/admin_custom.css',)  # Путь к вашему CSS-файлу
+        }
+        js = ('js/admin_custom.js',)
+
+    history_list_display = ['changed_fields']  # Показывать изменённые поля
+
+    def save_formset(self, request, form, formset, change):
+        """
+        Сохранение формсета с установкой history_user для связанных моделей.
+        """
+        instances = formset.save(commit=False)  # Получаем экземпляры, которые будут сохранены
+
+        for instance in instances:
+            # Проверяем, есть ли у модели поле history_user
+            if hasattr(instance, 'history_user'):
+                instance.history_user = request.user  # Устанавливаем пользователя
+            instance.save()  # Сохраняем экземпляр
+
+        # Обработка M2M отношений
+        formset.save_m2m()
+
+        # Обработка уже существующих объектов (если они были изменены)
+        for deleted_object in formset.deleted_objects:
+            if hasattr(deleted_object, 'history_user'):
+                deleted_object.history_user = request.user  # Устанавливаем пользователя при удалении
+            deleted_object.delete()  # Удаляем объект
+
+        # Обработка измененных объектов
+        for changed_object in formset.changed_objects:
+            obj = changed_object[0]  # Первый элемент кортежа — это измененный объект
+            if hasattr(obj, 'history_user'):
+                obj.history_user = request.user  # Устанавливаем пользователя при изменении
+            obj.save()  # Сохраняем объект
+
+    def get_urls(self):
+        from django.urls import path
+        urls = super().get_urls()
+        custom_urls = [
+            path('combined-history/<int:order_id>/', self.admin_site.admin_view(self.combined_history_view),
+                 name='order-combined-history'),
+        ]
+        return custom_urls + urls
+
+    def combined_history_view(self, request, order_id):
+        """
+        Показывает объединенную историю заказа и связанных моделей.
+        """
+        from orders.models import Order, ProductOrder, SecondProductOrder
+        from django.contrib.auth.models import User
+
+        order = Order.objects.get(id=order_id)
+
+        # Вспомогательная функция для преобразования ID пользователя в имя
+        def format_user_change(change):
+            if change.field == 'history_user' or change.field == 'user':
+                old_user = User.objects.filter(id=change.old).first()
+                new_user = User.objects.filter(id=change.new).first()
+                return f"{change.field} ({getattr(old_user, 'username', '(пусто)')} → {getattr(new_user, 'username', '(пусто)')})"
+            return f"{change.field} ({change.old or '(пусто)'} → {change.new or '(пусто)'})"
+
+        # История заказа
+        order_history = []
+        for record in order.history.all():
+            if record.prev_record:
+                delta = record.diff_against(record.prev_record)
+                changes = [format_user_change(change) for change in delta.changes]
+            else:
+                changes = [""]  # При создании записи изменений нет
+
+            # Добавляем запись только если есть изменения
+            if any(changes):
+                order_history.append({
+                    'record': record,
+                    'changes': changes,
+                })
+
+        # История связанных продуктов
+        product_order_history = []
+        for record in ProductOrder.history.filter(order_id=order.id):
+            if record.prev_record:
+                delta = record.diff_against(record.prev_record)
+                changes = [format_user_change(change) for change in delta.changes]
+            else:
+                # Добавляем product_name при создании записи
+                product_name = getattr(record, 'product', None)
+                product_name_str = product_name.product_name if product_name else '(не указано)'
+                changes = [f"{product_name_str}"]
+
+            # Добавляем запись только если есть изменения
+            if any(changes):
+                product_order_history.append({
+                    'record': record,
+                    'changes': changes,
+                })
+
+        # История вторичных продуктов
+        second_product_order_history = []
+        for record in SecondProductOrder.history.filter(order_id=order.id):
+            if record.prev_record:
+                delta = record.diff_against(record.prev_record)
+                changes = [format_user_change(change) for change in delta.changes]
+            else:
+                # Добавляем product_name при создании записи
+                product_name = getattr(record, 'product', None)
+                product_name_str = product_name.product_name if product_name else '(не указано)'
+                changes = [f"{product_name_str}"]
+
+            # Добавляем запись только если есть изменения
+            if any(changes):
+                second_product_order_history.append({
+                    'record': record,
+                    'changes': changes,
+                })
+
+        context = {
+            'order_id': order_id,
+            'histories': {
+                'История заказа': order_history,
+                'История связанных продуктов': product_order_history,
+                'История вторичных продуктов': second_product_order_history,
+            },
+        }
+        return render(request, 'admin/orders/combined_history.html', context)
+
+
+
+    def changed_fields(self, obj):
+        """
+        Возвращает список изменённых полей с заменой ID пользователя на его имя.
+        """
+        if obj.prev_record:
+            delta = obj.diff_against(obj.prev_record)
+            changes = []
+            for change in delta.changes:
+                if change.field == 'history_user':  # Если изменено поле history_user
+                    old_user = User.objects.filter(id=change.old).first()
+                    new_user = User.objects.filter(id=change.new).first()
+                    changes.append(
+                        f"Пользователь ({getattr(old_user, 'username', '(пусто)')} → {getattr(new_user, 'username', '(пусто)')})"
+                    )
+                elif change.field == 'user':  # Если изменено поле user
+                    old_user = User.objects.filter(id=change.old).first()
+                    new_user = User.objects.filter(id=change.new).first()
+                    changes.append(
+                        f"Назначенный пользователь ({getattr(old_user, 'username', '(пусто)')} → {getattr(new_user, 'username', '(пусто)')})"
+                    )
+                else:
+                    changes.append(f"{change.field} ({change.old or '(пусто)'} → {change.new or '(пусто)'})")
+            return ", ".join(changes)
+        return "-"
+
+    changed_fields.short_description = 'Изменённые поля'
+
+
+
+
+
+
+
+    def order_number_with_conditions(self, obj):
+        # Проверяем условия: check_call == True и comment не пустое
+        should_highlight = obj.check_call and bool(obj.comment)
+        return format_html(
+            '<span data-should-highlight="{}">{}</span>',
+            str(should_highlight).lower(),  # Передаем "true" или "false"
+            obj.order_number
+        )
+
+    order_number_with_conditions.short_description = 'Номер заказа'
+    order_number_with_conditions.admin_order_field = 'order_number'
+
+    def changeform_view(self, request, object_id=None, form_url='', extra_context=None):
+        extra_context = extra_context or {}
+        extra_context['show_save'] = False
+        extra_context['show_save_and_add_another'] = False
+        return super().changeform_view(request, object_id, form_url, extra_context)
+
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        if request.user.is_superuser:
+            return qs
+        accessible_stage_ids = GroupStagePermission.get_accessible_stages(request.user)
+        qs = qs.filter(stage_id__in=accessible_stage_ids)
+        days_limit = GroupStagePermission.get_days_limit(request.user)
+        if days_limit is not None:
+            cutoff_date = timezone.now() - timezone.timedelta(days=days_limit)
+            qs = qs.filter(updated_at__gte=cutoff_date)
+        return qs
 
     def formatted_created_at(self, obj):
         if obj.created_at:
@@ -190,18 +454,6 @@ class OrderAdmin(SimpleHistoryAdmin):
             readonly_fields += ('client',)
         return readonly_fields
 
-    def get_queryset(self, request):
-        qs = super().get_queryset(request)
-        if request.user.is_superuser:
-            return qs
-        accessible_stage_ids = GroupStagePermission.get_accessible_stages(request.user)
-        qs = qs.filter(stage_id__in=accessible_stage_ids)
-        days_limit = GroupStagePermission.get_days_limit(request.user)
-        if days_limit is not None:
-            cutoff_date = timezone.now() - timezone.timedelta(days=days_limit)
-            qs = qs.filter(updated_at__gte=cutoff_date)
-        return qs
-
     def get_form(self, request, obj=None, **kwargs):
         form = super().get_form(request, obj, **kwargs)
         form.base_fields['stage'].queryset = Order.get_available_stages(request.user, obj=obj)
@@ -213,9 +465,6 @@ class OrderAdmin(SimpleHistoryAdmin):
         if 'check_call' in form.changed_data:
             obj._manual_check_call_change = True
         super().save_model(request, obj, form, change)
-
-    class Media:
-        js = ["admin_custom.js"]
 
     def get_fieldsets(self, request, obj=None):
         fieldsets = [
@@ -233,7 +482,7 @@ class OrderAdmin(SimpleHistoryAdmin):
                 "Оплата",
                 {
                     "classes": ["collapse"],
-                    "fields": ['user'],
+                    "fields": [],
                 },
             ),
         ]
@@ -244,12 +493,10 @@ class OrderAdmin(SimpleHistoryAdmin):
         return fieldsets
 
     def client_address(self, obj):
-        if obj.client:
-            return obj.client.address
+        return obj.client.address if obj.client else ''
 
     def client_phone_number(self, obj):
-        if obj.client:
-            return obj.client.phone_number
+        return obj.client.phone_number if obj.client else ''
 
     client_phone_number.short_description = 'Телефон'
 
@@ -278,29 +525,8 @@ class OrderAdmin(SimpleHistoryAdmin):
     first_message.short_description = 'Внимание2'
     second_message.short_description = 'Внимание3'
 
-    def formfield_for_foreignkey(self, db_field, request, **kwargs):
-        if db_field.name == "user":
-            kwargs["queryset"] = User.objects.filter(id=request.user.id)
-        return super().formfield_for_foreignkey(db_field, request, **kwargs)
-
-    def changeform_view(self, request, object_id=None, form_url='', extra_context=None):
-        extra_context = extra_context or {}
-        extra_context['show_save'] = False
-        extra_context['show_save_and_add_another'] = False
-        return super().changeform_view(request, object_id, form_url, extra_context)
-
     def get_sortable_by(self, request):
         return {*self.get_list_display(request)} - {"order_sum"} - {'check_call'} - {"client"}
-
-    def calculate_product_area(self, product_order):
-        width = product_order.width or decimal.Decimal('0.0')
-        height = product_order.height or decimal.Decimal('0.0')
-        return width * height
-
-    def calculate_additional_product_area(self, additional_product, area):
-        if additional_product.product_unit.size_numb == 32:
-            return area
-        return None
 
     def create_payroll_records(self, orders, new_status, user):
         valid_stages = ['Грязный-Склад', 'Выбивание', 'Стирка', 'Финишка']
