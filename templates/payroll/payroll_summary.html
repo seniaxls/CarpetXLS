@@ -1,0 +1,94 @@
+{% extends "admin/base_site.html" %}
+
+{% block branding %}
+<h1 id="site-name"><a href="{% url 'admin:index' %}">carpetxls</a></h1>
+{% endblock %}
+{% block content %}
+    
+
+<style>
+    .form-inline {
+        display: flex;
+        align-items: center; /* Выравнивание элементов по вертикали */
+        flex-wrap: wrap; /* Перенос на новую строку, если не хватает места */
+    }
+    .form-inline .form-group {
+        display: flex;
+        align-items: center; /* Выравнивание текста и полей ввода */
+        margin-right: 15px; /* Расстояние между группами */
+    }
+    .form-inline .form-group label {
+        margin-right: 5px; /* Расстояние между меткой и полем ввода */
+    }
+    .form-inline button {
+        margin-left: auto; /* Кнопка "Поиск" будет справа */
+    }
+</style>
+
+<div class="container mt-4">
+    <h1>Payroll Summary</h1>
+    <form method="get" class="form-inline">
+        <div class="form-group">
+            {{ form.user.label_tag }}
+            {{ form.user }}
+        </div>
+        <div class="form-group">
+            {{ form.year.label_tag }}
+            {{ form.year }}
+        </div>
+        <div class="form-group">
+            {{ form.month.label_tag }}
+            {{ form.month }}
+        </div>
+        <div class="form-group">
+            {{ form.status.label_tag }}
+            {{ form.status }}
+        </div>
+        <div class="form-group">
+            {{ form.product_name.label_tag }}
+            {{ form.product_name }}
+        </div>
+        <div class="form-group">
+            {{ form.additional_product_name.label_tag }}
+            {{ form.additional_product_name }}
+        </div>
+        <button type="submit" class="btn btn-primary">Поиск</button>
+    </form>
+      {% if grouped_records %}
+        <h2>Сводная таблица:</h2>
+        <table class="table table-striped">
+            <thead>
+                <tr>
+                    <th>Статус</th>
+                    <th>Тип ковра</th>
+                    <th>Наименование доп услуги</th>
+                    <th>Кол-во</th>
+                    <th>м²</th>
+                    <th>Сумма ₽</th>
+
+                </tr>
+            </thead>
+            <tbody>
+                {% for key, data in grouped_records.items %}
+                    <tr>
+                        <td>{{ key.0|default_if_none:"" }}</td>
+                        <td>{{ key.1|default_if_none:"" }}</td>
+                        <td>{{ key.2|default_if_none:"" }}</td>
+                        <td>{{ data.count }}</td>
+                        <td>{{ data.total_area|floatformat:2|default_if_none:" " }}</td>
+                        <td>{{ data.total_additional_product_price|floatformat:2|default_if_none:" " }}</td>
+
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+    <a href="{% url 'admin:index' %}">Home</a> &rsaquo;
+    Payroll Summary
+</div>
+{% endblock %}

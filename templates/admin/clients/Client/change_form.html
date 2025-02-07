@@ -1,0 +1,181 @@
+{% extends 'admin/change_form.html' %}
+
+{% load static %}
+{% load extra_settings %}
+
+{% block admin_change_form_document_ready %}
+    <!-- Подключаем jQuery -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+    <!-- Подключаем CSS для плагина suggestions -->
+    <link href="https://cdn.jsdelivr.net/npm/suggestions-jquery@22.6.0/dist/css/suggestions.min.css" rel="stylesheet"/>
+    <!-- Подключаем JS для плагина suggestions -->
+    <script src="https://cdn.jsdelivr.net/npm/suggestions-jquery@22.6.0/dist/js/jquery.suggestions.min.js"></script>
+
+    <script>
+        $(document).ready(function() {
+            // Установка на все инпуты запрет на автокомплит
+            $('input').attr('autocomplete', '');
+
+            // Изменение типа ввода для телефонных полей
+            $('#id_phone_number, #id_home, #id_apartment, #id_entrance').attr('type', 'tel');
+
+            // Получение параметра "phone" из URL и обработка значения поля телефона
+            const getPhone = new URLSearchParams(window.location.search).get("phone");
+            const phoneInput = $('#id_phone_number');
+
+            if (getPhone !== null && /\d/.test(getPhone)) {
+                if (getPhone[0] === '8' && getPhone.length === 11) {
+                    phoneInput.val("+7" + getPhone.slice(1));
+                }
+                if (getPhone[0] === '9' && getPhone.length === 10) {
+                    phoneInput.val("+7" + getPhone);
+                }
+            }
+
+            // Обработчик события ввода для поля телефона
+            phoneInput.on('input', function () {
+                const value = $(this).val();
+                if (value.length === 10 && value[0] === '9') {
+                    $(this).val("+7" + value);
+                }
+                if (value.length === 11 && value[0] === '8') {
+                    $(this).val("+7" + value.slice(1));
+                }
+            });
+
+            // Получение токена для работы с Dadata API
+            const dadataToken = "{% get_setting 'DADATA_TOKEN' %}";
+
+            // Настройка подсказок для поля ФИО
+            $("input[name=fio]").suggestions({
+                token: dadataToken,
+                type: "FIO",
+                onSelect: function (suggestion) {
+                    // Вызывается, когда пользователь выбирает одну из подсказок
+                }
+            });
+
+            // Настройка подсказок для поля города
+            const $city = $("#id_city").suggestions({
+                token: dadataToken,
+                type: "ADDRESS",
+                hint: false,
+                bounds: "city"
+            });
+
+            // Настройка подсказок для поля улицы
+            const $street = $("#id_street").suggestions({
+                token: dadataToken,
+                type: "ADDRESS",
+                hint: false,
+                bounds: "street",
+                constraints: $city
+            });
+
+            // Настройка подсказок для поля дома
+            const $house = $("#id_home").suggestions({
+                token: dadataToken,
+                type: "ADDRESS",
+                hint: false,
+                noSuggestionsHint: false,
+                bounds: "house",
+                constraints: $street
+            });
+        });
+    </script>
+
+    <style>
+        /* Стили для контейнера подсказок */
+        .suggestions-wrapper {
+            width: 514px;
+            position: absolute;
+            margin-top: 30px;
+            left: 243px;
+        }
+
+        /* Основные стили для текстовых и телефонных полей */
+        input[type=text],
+        input[type=tel] {
+            width: 500px;
+        }
+
+        /* Ширина для специфических полей */
+        #id_fio,
+        #id_street,
+        #id_home,
+        #id_city {
+            width: 514px;
+        }
+
+        /* Стили для попапа */
+        .popup {
+            /* Стили для контейнера подсказок внутри попапа */
+            .suggestions-wrapper {
+                position: absolute;
+                margin-top: 30px;
+                left: 200px;
+            }
+
+            /* Стили для текстовых и телефонных полей внутри попапа */
+            input[type=text],
+            input[type=tel] {
+                width: 500px;
+            }
+
+            /* Ширина для поля ФИО внутри попапа */
+            #id_fio,
+            select {
+                width: 514px;
+            }
+
+            /* Медиазапросы для экранов шириной до 1024px */
+            @media (max-width: 1024px) {
+                input[type=text],
+                input[type=tel],
+                #id_fio,
+                #id_street,
+                #id_home,
+                #id_city {
+                    width: 100%;
+                }
+
+                /* Ширина для flex-контейнера */
+                .flex-container {
+                    width: 95%;
+                }
+
+                /* Стили для контейнера подсказок внутри попапа */
+                .suggestions-wrapper {
+                    width: 65%;
+                    position: absolute;
+                    margin-top: 37px;
+                }
+            }
+
+            /* Медиазапросы для экранов шириной до 767px */
+            @media (max-width: 767px) {
+                input[type=text],
+                input[type=tel],
+                #id_fio {
+                    width: 100%;
+                }
+
+                /* Ширина для flex-контейнера */
+                .flex-container {
+                    width: 95%;
+                }
+
+                /* Стили для контейнера подсказок внутри попапа */
+                .suggestions-wrapper {
+                    width: 88%;
+                    position: absolute;
+                    margin-top: 68px;
+                    left: 20px;
+                }
+            }
+        }
+    </style>
+
+    {{ block.super }}
+
+{% endblock %}
