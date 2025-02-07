@@ -6,6 +6,8 @@ from django.shortcuts import render, redirect
 from django.utils.html import format_html
 from django.contrib import admin
 from django.utils.translation import gettext_lazy as _
+
+from cash_register.models import Receipt
 from .models import *
 
 from django import forms
@@ -122,6 +124,54 @@ class SecondProductOrderInline(admin.TabularInline):
         return super().has_add_permission(request, obj)
 
 
+class ReceiptInline(admin.TabularInline):
+    model = Receipt
+    extra = 1  # Количество пустых форм для добавления новых чеков
+    readonly_fields = (
+        'display_payment_method', 'created_at', 'amount', 'display_shift'
+    )  # Поля только для чтения
+    can_delete = False  # Запрет на удаление чеков через интерфейс администратора
+    template = "admin/orders/Order/myinline.html"
+
+    def has_change_permission(self, request, obj=None):
+        # Запрет на изменение существующих чеков через inline
+        return False
+
+    def display_payment_method(self, obj):
+        """
+        Отображает способ оплаты с номером чека.
+        """
+        if obj.pk:  # Если объект уже сохранен (имеет ID)
+            return format_html(
+                '<strong>{} (внутренний чек №{})</strong>',
+                obj.get_payment_method_display(),
+                obj.pk
+            )
+        return "-"
+
+    display_payment_method.short_description = "Способ оплаты"  # Название столбца в админке
+
+    def display_shift(self, obj):
+        """
+        Отображает значение поля shift без ссылки.
+        """
+        if obj and obj.shift:
+            return str(obj.shift)  # Возвращаем строковое представление объекта Shift
+        return "-"
+
+    display_shift.short_description = "Смена"  # Название столбца в админке
+
+    def get_fields(self, request, obj=None):
+        """
+        Динамически определяет поля в зависимости от того, создан ли объект Receipt.
+        """
+        if obj:  # Если объект Order существует
+            if Receipt.objects.filter(order=obj).exists():
+                return ['display_payment_method', 'created_at', 'amount', 'display_shift']
+        return ['payment_method', 'created_at', 'amount', ]
+
+
+
 @admin.register(GroupStagePermission)
 class GroupStagePermissionAdmin(admin.ModelAdmin):
     list_display = ('group', 'get_stages', 'days_limit')
@@ -216,8 +266,10 @@ class CheckCallFilter(admin.SimpleListFilter):
 
 class OrderAdmin(SimpleHistoryAdmin):
     history_list_display = ['changed_fields']
+    fields = (('client', 'stage', 'check_call', "target_date"), ("comment",),
+              ('order_sum', 'client_address', 'client_phone_number'))
     list_per_page = 15
-    inlines = [ProductOrderInline, SecondProductOrderInline]
+    inlines = [ProductOrderInline, SecondProductOrderInline, ReceiptInline]
     autocomplete_fields = ['client']
     search_fields = ['client__fio', 'id', 'order_sum', 'order_number', 'client__address', 'client__phone_number']
     list_display = (
@@ -237,6 +289,12 @@ class OrderAdmin(SimpleHistoryAdmin):
             'all': ('css/admin_custom.css',)  # Путь к вашему CSS-файлу
         }
         js = ('js/admin_custom.js',)
+
+    def save_model(self, request, obj, form, change):
+        obj.history_user = request.user
+        if 'check_call' in form.changed_data:
+            obj._manual_check_call_change = True
+        super().save_model(request, obj, form, change)
 
     history_list_display = ['changed_fields']  # Показывать изменённые поля
 
@@ -460,37 +518,11 @@ class OrderAdmin(SimpleHistoryAdmin):
         form.base_fields['stage'].empty_label = None
         return form
 
-    def save_model(self, request, obj, form, change):
-        obj.history_user = request.user
-        if 'check_call' in form.changed_data:
-            obj._manual_check_call_change = True
-        super().save_model(request, obj, form, change)
 
-    def get_fieldsets(self, request, obj=None):
-        fieldsets = [
-            (
-                None,
-                {
-                    "fields": [
-                        ('client', 'stage', 'check_call', "target_date"),
-                        ("comment",),
-                        ('order_sum', 'client_address', 'client_phone_number'),
-                    ],
-                },
-            ),
-            (
-                "Оплата",
-                {
-                    "classes": ["collapse"],
-                    "fields": [],
-                },
-            ),
-        ]
-        if Setting.get('MESSAGE_FOR_ORDER_EDU_ACTIVE'):
-            fieldsets[0][1]['fields'].append(('first_message', 'second_message'))
-        if Setting.get('MESSAGE_FOR_ORDER_ACTIVE'):
-            fieldsets[0][1]['fields'].append(('message_for_order'))
-        return fieldsets
+
+
+
+
 
     def client_address(self, obj):
         return obj.client.address if obj.client else ''
@@ -609,6 +641,8 @@ class OrderAdmin(SimpleHistoryAdmin):
 
 class ProductUnitEdite(admin.ModelAdmin):
     readonly_fields = ['size_numb', 'size_name', 'size_name_short']
+
+
 
 
 admin.site.register(Order, OrderAdmin)

@@ -46,6 +46,7 @@ INSTALLED_APPS = [
     'simple_history',
     'nested_admin',
     'account',
+    'cash_register',
 
 
 ]
