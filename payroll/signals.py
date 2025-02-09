@@ -48,6 +48,17 @@ def handle_order_status_change(sender, instance, **kwargs):
     latest_history = history_manager.filter(id=instance.id).first()
     user = latest_history.history_user if latest_history else None
 
+    for product_order in instance.second_product_orders.all():
+        area = product_order.second_amount
+        if instance.stage.name == 'Грязный-Склад':
+            PayrollRecord.objects.create(
+                user=user,
+                order=instance,
+                status='Грязный-Склад',
+                product_name=product_order.product.product_name,
+                area=area
+            )
+
     for product_order in instance.product_order.all():
         area = calculate_product_area(product_order)
         if instance.stage.name == 'Грязный-Склад':

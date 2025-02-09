@@ -6,24 +6,25 @@ from .models import ProductOrder, Order, ProductUnit, SecondProductOrder
 from django.db.models.signals import post_migrate
 from django.dispatch import receiver
 from .models import Stage
-from django.contrib.auth.models import Group
+from django.contrib.auth.models import Group, Permission
 from .models import Stage, GroupStagePermission
 
 @receiver(post_migrate)
 def create_default_product_units(sender, **kwargs):
     if sender.name == 'orders':  # Убедитесь, что сигнал работает только для приложения 'orders'
-        for size_numb, size_name, size_name_short in ProductUnit.SIZE_TYPES:
-            obj, created = ProductUnit.objects.get_or_create(
-                size_numb=size_numb,
-                defaults={
-                    'size_name': size_name,
-                    'size_name_short': size_name_short
-                }
-            )
-            if created:
-                print(f"Создана единица измерения: {size_name} ({size_name_short})")
-            else:
-                print(f"Единица измерения уже существует: {size_name} ({size_name_short})")
+        if not ProductUnit.objects.exists():
+            for size_numb, size_name, size_name_short in ProductUnit.SIZE_TYPES:
+                obj, created = ProductUnit.objects.get_or_create(
+                    size_numb=size_numb,
+                    defaults={
+                        'size_name': size_name,
+                        'size_name_short': size_name_short
+                    }
+                )
+                if created:
+                    print(f"Создана единица измерения: {size_name} ({size_name_short})")
+                else:
+                    print(f"Единица измерения уже существует: {size_name} ({size_name_short})")
 
 @receiver(post_migrate)
 def create_default_stages(sender, **kwargs):
@@ -37,37 +38,78 @@ def create_default_stages(sender, **kwargs):
                 )
             print("Данные этапов успешно созданы.")
 
+
 @receiver(post_migrate)
 def create_default_groups_and_permissions(sender, **kwargs):
     if sender.name == 'orders':  # Убедитесь, что сигнал работает только для приложения 'orders'
-        # Создаем группы пользователей
-        groups_to_create = ['Директор', 'Мойщик', 'Оператор']
-        for group_name in groups_to_create:
-            Group.objects.get_or_create(name=group_name)
-            print(f"Группа '{group_name}' успешно создана или уже существует.")
+        # Список групп и соответствующих этапов
+        groups_and_stages = {
+            'Управляющий': [
+                'Лид', 'Нужен вывоз', 'Отменен', 'Курьер забрал', 'Принят в цех',
+                'Грязный-Склад', 'Выбивание', 'Стирка', 'Нужен оверлок', 'Финишка',
+                'Чистый-Склад', 'Нужна доставка', 'Везем клиенту', 'Выполнен',
+                'Возврат', 'Вывоз возврата', 'Везем возврат', 'Сброс'
+            ],
+            'Оператор': [
+                'Лид', 'Нужен вывоз', 'Отменен',
+                'Чистый-Склад', 'Нужна доставка',
+                'Выполнен', 'Возврат', 'Вывоз возврата',
+            ],
+            'Курьер': [
+                'Нужен вывоз', 'Курьер забрал', 'Принят в цех',
+                'Нужна доставка', 'Везем клиенту', 'Выполнен',
+                'Вывоз возврата', 'Везем возврат', 'Возврат на складе'
+            ],
+            'Мойщик': [
+                'Нужен вывоз', 'Принят в цех',
+                'Грязный-Склад', 'Выбивание', 'Стирка', 'Нужен оверлок', 'Финишка',
+                'Чистый-Склад', 'Нужна доставка', 'Выполнен',
+                'Возврат'
+            ],
+        }
 
-        # Настройка разрешений для группы "Директор"
-        director_group, _ = Group.objects.get_or_create(name='Директор')
-        stages_for_director = Stage.objects.filter(name__in=['Лид', 'Выбивание'])
-        if stages_for_director.exists():
-            permission, created = GroupStagePermission.objects.get_or_create(group=director_group)
-            permission.stages.set(stages_for_director)
-            print("Разрешения для группы 'Директор' успешно созданы или обновлены.")
+        # Разрешения для каждой группы
+        group_permissions = {
+            'Оператор': [29, 30, 32, 49, 50, 52, 57, 60, 73, 76],
+            'Курьер': [50, 52, 57, 58, 73, 74],
+            'Мойщик': [
+                29, 30, 32, 49, 50, 52, 57, 58, 59, 60,
+                73, 74, 75, 76, 97, 98, 101, 104, 105, 108, 109, 112
+            ],
+            'Управляющий': [
+                12, 16, 29, 30, 32, 34, 38, 49, 50, 52,
+                57, 58, 59, 60, 66, 73, 74, 75, 76, 84, 88, 97, 98, 101, 104, 105, 108, 109, 112],
+        }
 
-        washer_group, _ = Group.objects.get_or_create(name='Мойщик')
-        stages_for_washer = Stage.objects.filter(name__in=['Грязный-Склад', 'Стирка'])
-        if stages_for_washer.exists():
-            permission, created = GroupStagePermission.objects.get_or_create(group=washer_group)
-            permission.stages.set(stages_for_washer)
-            print("Разрешения для группы 'Мойщик' успешно созданы или обновлены.")
+        # Проходим по каждой группе
+        for group_name, stage_names in groups_and_stages.items():
+            group, _ = Group.objects.get_or_create(name=group_name)
+            stages = Stage.objects.filter(name__in=stage_names)
+
+            if stages.exists():
+                permission, created = GroupStagePermission.objects.get_or_create(group=group)
+                permission.stages.set(stages)
+
+                # Если группа "Оператор", устанавливаем allow_call_status=True
+                if group_name == 'Оператор':
+                    permission.allow_call_status = True
+                    permission.save()
+                    print(f"Для группы '{group_name}' установлено allow_call_status=True.")
+
+                print(f"Разрешения для группы '{group_name}' успешно созданы или обновлены.")
+
+                # Добавляем разрешения из словаря group_permissions
+                if group_name in group_permissions:
+                    permission_ids = group_permissions[group_name]
+                    permissions = Permission.objects.filter(id__in=permission_ids)
+                    group.permissions.set(permissions)
+                    print(f"Добавлены разрешения для группы '{group_name}'.")
+            else:
+                print(f"Не найдено этапов для группы '{group_name}'.")
 
 
-@receiver(pre_save, sender=ProductOrder)
-def calc_amount(sender, instance, **kwargs):
-    if instance.overlock is None:
-        instance.overlock = 0
-    if instance.allowance is None:
-        instance.allowance = 0
+
+
 
 @receiver(m2m_changed, sender=ProductOrder.product_add.through)
 def handle_product_add_m2m_change(sender, instance, action, **kwargs):

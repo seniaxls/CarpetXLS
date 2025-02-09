@@ -158,7 +158,7 @@ class Receipt(models.Model):
             raise ValidationError("Нельзя создать новый чек для заказа, пока не выполнен возврат по предыдущему чеку.")
         # Проверяем, что stage_group заказа равен 7
         if self.order.stage.group_stage != 7:
-            raise ValidationError("Чек можно создать только для заказа с stage_group = 7.")
+            raise ValidationError("Чек можно создать только для заказа с статусом ['Нужна доставка','Везем клиенту', 'Выполнен']")
         if not self.shift:
             open_shift = Shift.objects.filter(status='open').first()
             if not open_shift:

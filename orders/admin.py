@@ -1,4 +1,4 @@
-from extra_settings.models import Setting
+from django.db.models import Q
 from django.utils.timezone import localtime
 from simple_history.admin import SimpleHistoryAdmin
 from user_agents import parse
@@ -28,24 +28,53 @@ class ProductAddReadonlyWidget(forms.Widget):
         return mark_safe(f"<ul>{items}</ul>")
 
 
+
+
+
 class ProductOrderForm(forms.ModelForm):
     class Meta:
         model = ProductOrder
         fields = '__all__'
         widgets = {
-            'product_add': forms.CheckboxSelectMultiple(),  # Стандартный виджет для редактирования
+
+            'product_add': forms.CheckboxSelectMultiple(),
+
+            # Стандартный виджет для редактирования
         }
 
     def __init__(self, *args, **kwargs):
+        self.request = kwargs.pop('request', None) or getattr(self.__class__, '_request', None)
         super().__init__(*args, **kwargs)
-        obj = kwargs.get('instance')  # Получаем текущий объект
+        user_agent = parse(self.request.META.get('HTTP_USER_AGENT', ''))
+        self.request.is_mobile = user_agent.is_mobile
+
+
+        # Проверяем, является ли устройство мобильным
+        if self.request and getattr(self.request, 'is_mobile', False):
+            # Сохраняем старый виджет
+            old_widget = self.fields['product_add'].widget
+            # Создаем новый виджет SelectMultiple
+            new_widget = forms.SelectMultiple()
+            # Копируем атрибуты и данные из старого виджета
+            new_widget.attrs = old_widget.attrs  # Копируем HTML-атрибуты
+            new_widget.choices = old_widget.choices  # Копируем доступные варианты
+            # Применяем новый виджет
+            self.fields['product_add'].widget = new_widget
+
+
+
+        # Получаем текущий объект (instance)
+        obj = kwargs.get('instance')
         if obj and hasattr(obj, 'order_id') and obj.order_id and hasattr(obj.order_id, 'stage'):
+            obj = kwargs.get('instance')
+
+            # Проверяем значение group_stage
             if obj.order_id.stage.group_stage >= 2:
-                # Если group_stage >= 2, делаем product_add доступным только для чтения
-                if 'product_add' in self.fields:  # Проверяем наличие поля
+                if 'product_add' in self.fields:
                     self.fields['product_add'].widget = ProductAddReadonlyWidget()
                     self.fields['product_add'].required = False
                     self.fields['product_add'].disabled = True
+
 
 
 class ProductOrderInline(admin.TabularInline):
@@ -53,8 +82,30 @@ class ProductOrderInline(admin.TabularInline):
     form = ProductOrderForm  # Подключаем кастомную форму
     template = "admin/orders/Order/myinline.html"
     classes = ['collapse']
-    fields = ['message', 'width', 'height', 'product_add', 'overlock', 'allowance', 'comment']
+    fields = ['message', 'height', 'width',  'product_add', 'overlock', 'allowance', 'comment']
     readonly_fields = ['message']
+
+    def get_formset(self, request, obj=None, **kwargs):
+
+        user_agent = parse(request.META.get('HTTP_USER_AGENT', ''))
+        request.is_mobile = user_agent.is_mobile
+        formset = super().get_formset(request, obj, **kwargs)
+        formset.form._request = request  # Устанавливаем request как атрибут класса
+        return formset
+
+    def get_form(self, request, obj=None, **kwargs):
+
+        """
+        Переопределяем метод get_form для передачи request в форму.
+        """
+        form = super().get_form(request, obj, **kwargs)
+        form.request = request  # Добавляем request к форме
+        return form
+
+
+
+
+
 
     def has_add_permission(self, request, obj=None):
         if obj and hasattr(obj, 'stage') and obj.stage.group_stage >= 2:
@@ -69,7 +120,7 @@ class ProductOrderInline(admin.TabularInline):
 
 
     def get_fields(self, request, obj=None):
-        fields = ['product', 'width', 'height', 'product_add', 'comment']
+        fields = ['product',  'height', 'width','product_add', 'comment']
         if  obj and obj.stage and 6 > obj.stage.group_stage >= 2:
             fields = ('message', 'overlock', 'allowance', 'product_add', 'comment')
         elif obj and obj.stage and obj.stage.group_stage >= 6:
@@ -83,25 +134,7 @@ class ProductOrderInline(admin.TabularInline):
             extra = 0
         return extra
 
-    def get_formset(self, request, obj=None, **kwargs):
-        """
-        Переопределяем метод get_formset для передачи дополнительных данных в форму.
-        """
-        user_agent = parse(request.META.get('HTTP_USER_AGENT', ''))
-        request.is_mobile = user_agent.is_mobile
 
-        if request.is_mobile:
-            self.form.base_fields['product_add'].widget = forms.SelectMultiple()
-        else:
-            self.form.base_fields['product_add'].widget = forms.CheckboxSelectMultiple()
-
-        # Если group_stage >= 2, делаем product_add доступным только для чтения
-        if obj and hasattr(obj, 'stage') and obj.stage.group_stage >= 2:
-            self.form.base_fields['product_add'].widget = ProductAddReadonlyWidget()
-            self.form.base_fields['product_add'].required = False
-            self.form.base_fields['product_add'].disabled = True
-
-        return super().get_formset(request, obj, **kwargs)
 
 
 class SecondProductOrderInline(admin.TabularInline):
@@ -275,7 +308,7 @@ class OrderAdmin(SimpleHistoryAdmin):
     list_display = (
         'order_number_with_conditions', 'client', 'client_phone_number', 'check_call', 'order_sum', 'stage',
         'formatted_created_at',
-        'formatted_updated_at', 'formatted_target_date'
+        'formatted_updated_at',
     )
     list_display_links = (
         'order_number_with_conditions', 'client', 'client_phone_number', 'order_sum', 'stage'
@@ -289,6 +322,11 @@ class OrderAdmin(SimpleHistoryAdmin):
             'all': ('css/admin_custom.css',)  # Путь к вашему CSS-файлу
         }
         js = ('js/admin_custom.js',)
+
+
+
+
+
 
     def save_model(self, request, obj, form, change):
         obj.history_user = request.user
@@ -454,9 +492,10 @@ class OrderAdmin(SimpleHistoryAdmin):
     def order_number_with_conditions(self, obj):
         # Проверяем условия: check_call == True и comment не пустое
         should_highlight = obj.check_call and bool(obj.comment)
+        should_highlight2 = True if obj.target_date else False
         return format_html(
-            '<span data-should-highlight="{}">{}</span>',
-            str(should_highlight).lower(),  # Передаем "true" или "false"
+            '<span data-should-highlight="{}" data-should-highlight2="{}">{}</span>',
+            str(should_highlight).lower(), str(should_highlight2).lower(), # Передаем "true" или "false"
             obj.order_number
         )
 
@@ -470,15 +509,33 @@ class OrderAdmin(SimpleHistoryAdmin):
         return super().changeform_view(request, object_id, form_url, extra_context)
 
     def get_queryset(self, request):
+        # Получаем базовый QuerySet
         qs = super().get_queryset(request)
+
+        # Если пользователь является суперпользователем, возвращаем все записи
         if request.user.is_superuser:
             return qs
+
+        # Получаем доступные этапы и флаг check_call для пользователя
         accessible_stage_ids = GroupStagePermission.get_accessible_stages(request.user)
-        qs = qs.filter(stage_id__in=accessible_stage_ids)
+        accessible_allow_call_status = GroupStagePermission.get_accessible_allow_call_status(request.user)
+
+        # Формируем начальное условие для фильтрации по этапам
+        filter_conditions = Q(stage_id__in=accessible_stage_ids)
+
+        # Если разрешено использование check_call, добавляем это условие
+        if accessible_allow_call_status:
+            filter_conditions |= Q(check_call=True)
+
+        # Применяем фильтрацию
+        qs = qs.filter(filter_conditions)
+
+        # Получаем ограничение по дням
         days_limit = GroupStagePermission.get_days_limit(request.user)
         if days_limit is not None:
             cutoff_date = timezone.now() - timezone.timedelta(days=days_limit)
             qs = qs.filter(updated_at__gte=cutoff_date)
+
         return qs
 
     def formatted_created_at(self, obj):
@@ -497,12 +554,6 @@ class OrderAdmin(SimpleHistoryAdmin):
 
     formatted_updated_at.short_description = 'Дата обновления'
 
-    def formatted_target_date(self, obj):
-        if obj.target_date:
-            return obj.target_date.strftime('%d.%m')
-        return '-'
-
-    formatted_target_date.short_description = 'Целевая дата'
 
     def get_readonly_fields(self, request, obj=None):
         readonly_fields = super().get_readonly_fields(request, obj)
@@ -531,31 +582,8 @@ class OrderAdmin(SimpleHistoryAdmin):
         return obj.client.phone_number if obj.client else ''
 
     client_phone_number.short_description = 'Телефон'
-
-    def message_for_order(self, order: Order):
-        value = Setting.get("MESSAGE_FOR_ORDER", default="django-extra-settings")
-        return value
-
-    def first_message(self, order: Order):
-        value = Setting.get("MESSAGE_FOR_ORDER_FIRST", default="django-extra-settings")
-        if order.pk:
-            value = Order.objects.get(pk=order.pk).stage.first_message
-        if value is None:
-            value = ''
-        return value
-
-    def second_message(self, order: Order):
-        value = Setting.get("MESSAGE_FOR_ORDER_SECOND", default="django-extra-settings")
-        if order.pk:
-            value = Order.objects.get(pk=order.pk).stage.second_message
-        if value is None:
-            value = ''
-        return value
-
     client_address.short_description = 'Адрес'
-    message_for_order.short_description = 'Внимание'
-    first_message.short_description = 'Внимание2'
-    second_message.short_description = 'Внимание3'
+
 
     def get_sortable_by(self, request):
         return {*self.get_list_display(request)} - {"order_sum"} - {'check_call'} - {"client"}

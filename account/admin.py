@@ -57,6 +57,8 @@ class CustomUserAdmin(UserAdmin):
         return obj.userprofile.patronymic
     get_patronymic.short_description = 'Отчество'
 
+
+
 # Перерегистрируем User с новой админкой
 admin.site.unregister(User)
 admin.site.register(User, CustomUserAdmin)

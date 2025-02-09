@@ -1,7 +1,7 @@
 {% extends 'admin/change_form.html' %}
 
 {% load static %}
-{% load extra_settings %}
+
 
 {% block admin_change_form_document_ready %}
     <!-- Подключаем jQuery -->
@@ -44,7 +44,7 @@
             });
 
             // Получение токена для работы с Dadata API
-            const dadataToken = "{% get_setting 'DADATA_TOKEN' %}";
+            const dadataToken = "{{ DADATA_TOKEN }}";
 
             // Настройка подсказок для поля ФИО
             $("input[name=fio]").suggestions({

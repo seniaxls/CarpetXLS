@@ -58,32 +58,21 @@ class BaseProduct(models.Model):
 
 class SecondProduct(BaseProduct):
     class Meta:
-        verbose_name = 'Услуги стирки'
-        verbose_name_plural = 'Услуги стирки'
+        verbose_name = 'Доп услуги'
+        verbose_name_plural = 'Доп услуги'
 
 class Product(BaseProduct):
     class Meta:
-        verbose_name = 'Услуги стирки ковров'
-        verbose_name_plural = 'Услуги стирки ковров'
+        verbose_name = 'Типы ковров'
+        verbose_name_plural = 'Типы ковров'
 
 
 
 class ProductAdd(BaseProduct):
-    SERVICE_TYPE_CHOICES = [
-        ('usual', 'Обычная услуга'),
-        ('overlock', 'Оверлок'),
-        ('additional', 'Дополнительная услуга'),
-    ]
 
-    service_type = models.CharField(
-        max_length=20,
-        choices=SERVICE_TYPE_CHOICES,
-        default='usual',
-        verbose_name='Тип услуги'
-    )
     class Meta:
-        verbose_name = 'Доп услуги стирки ковров'
-        verbose_name_plural = 'Доп услуги стирки ковров'
+        verbose_name = 'Доп услуги к коврам'
+        verbose_name_plural = 'Доп услуги к коврам'
 
 
 
@@ -108,6 +97,7 @@ class Stage(models.Model):
         ('Возврат', 8, True),
         ('Вывоз возврата', 8, True),
         ('Везем возврат', 8, True),
+        ('Возврат на складе', 8, True),
         ('Сброс', 9, True),
     )
 
@@ -141,7 +131,6 @@ class Order(models.Model):
     order_sum = models.DecimalField(default=0, verbose_name='Сумма заказа', decimal_places=2, max_digits=7)
     comment = models.TextField(default=None, verbose_name='Комментарий', blank=True)
     create_date = models.DateField(auto_now_add=True, verbose_name='Дата создания')
-
     created_at = models.DateTimeField(verbose_name="Дата создания", auto_now_add=True)
     updated_at = models.DateTimeField(verbose_name="Дата обновления", auto_now=True)
     target_date = models.DateField(blank=True, null=True, verbose_name='Целевая дата')
@@ -172,6 +161,8 @@ class Order(models.Model):
             next_group = current_group + 1
             next_group_stages = Stage.objects.filter(group_stage=next_group, id__in=accessible_stage_ids)
             available_stage_ids.update(next_group_stages.values_list('id', flat=True))
+            current_group_stages2 = Stage.objects.filter(super_stage=True,group_stage=current_group, id__in=accessible_stage_ids)
+            available_stage_ids.update(current_group_stages2.values_list('id', flat=True))
         else:
             # Иначе добавляем все этапы из текущей группы
             current_group_stages = Stage.objects.filter(group_stage=current_group, id__in=accessible_stage_ids)
@@ -215,12 +206,16 @@ class Order(models.Model):
                 self.check_call = True
                 print(f"Флаг 'Позвонить' автоматически установлен для этапа '{self.stage.name}'.")
 
-
         super().save(*args, **kwargs)
+
+        for product_order in self.product_order.all():
+            product_order.update_message()
+            product_order.save()
 
 class GroupStagePermission(models.Model):
     group = models.ForeignKey(Group, on_delete=models.CASCADE, verbose_name="Группа пользователей")
     stages = models.ManyToManyField(Stage, related_name='group_permissions', verbose_name="Доступные этапы")
+    allow_call_status = models.BooleanField(default=False)
     days_limit = models.PositiveIntegerField(
         default=30,
         verbose_name="Количество последних дней",
@@ -231,8 +226,17 @@ class GroupStagePermission(models.Model):
         return f"{self.group.name} - {', '.join([stage.name for stage in self.stages.all()])}"
 
     class Meta:
-        verbose_name = "Разрешение на этапы"
-        verbose_name_plural = "Разрешения на этапы"
+        verbose_name = "Доступные статусы пользователей"
+        verbose_name_plural = "Доступные статусы пользователей"
+
+    @staticmethod
+    def get_accessible_allow_call_status(user):
+
+        if user.is_superuser:
+            return True
+        group_ids = user.groups.values_list('id', flat=True)
+        accessible_stages = GroupStagePermission.objects.filter(group_id__in=group_ids, allow_call_status=True).exists()
+        return accessible_stages
 
     @staticmethod
     def get_accessible_stages(user):
@@ -377,29 +381,17 @@ class SecondProductOrder(models.Model):
 
 
 
-def set_product_add(instance, product_add_list):
-    if instance.pk is None:
-        # Если объект еще не сохранен, временно храним связанные объекты
-        instance._temp_product_add = product_add_list
-    else:
-        # Если объект уже сохранен, можно сразу установить связи Many-to-Many
-        instance.product_add.set(product_add_list)
-        instance.update_message()  # Пересчитываем стоимость и обновляем сообщение
-        instance.save()
-
-# Регистрация сигнала m2m_changed для связи product_add в модели ProductOrder
-@receiver(m2m_changed, sender=ProductOrder.product_add.through)
-def handle_product_add_m2m_change(sender, instance, action, **kwargs):
-    if action in ["post_add", "post_remove", "post_clear"]:
-        # После изменения связей Many-to-Many, пересчитываем стоимость и обновляем сообщение
-        instance.update_message()
-        instance.save()
+# def set_product_add(instance, product_add_list):
+#     if instance.pk is None:
+#         # Если объект еще не сохранен, временно храним связанные объекты
+#         instance._temp_product_add = product_add_list
+#     else:
+#         # Если объект уже сохранен, можно сразу установить связи Many-to-Many
+#         instance.product_add.set(product_add_list)
+#         instance.update_message()  # Пересчитываем стоимость и обновляем сообщение
+#         instance.save()
 
 
-# Регистрация сигнала pre_save для модели ProductOrder
-@receiver(pre_save, sender=ProductOrder)
-def handle_product_order_pre_save(sender, instance, **kwargs):
-    instance.update_message()
 
 
 

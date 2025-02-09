@@ -41,8 +41,9 @@ class ShiftAdmin(admin.ModelAdmin):
 @admin.register(Receipt)
 class ReceiptAdmin(admin.ModelAdmin):
     list_display = ('id', 'order', 'shift', 'payment_method', 'amount')
-    list_filter = ('payment_method', 'shift')
+    list_filter = ('payment_method', )
     readonly_fields = ('created_at', 'amount', 'shift')
+    search_fields=['id','order__id','amount']
 
     def clean(self):
         cleaned_data = super().clean()
@@ -54,7 +55,7 @@ class ReceiptAdmin(admin.ModelAdmin):
 
         # Дополнительные проверки (если нужны)
         if order and order.stage.group_stage != 7:
-            raise ValidationError("Чек можно создать только для заказа с stage_group = 7.")
+            raise ValidationError("Чек можно создать только для заказа с статусом ['Нужна доставка','Везем клиенту', 'Выполнен']")
 
         return cleaned_data
 
@@ -68,10 +69,17 @@ class ReceiptAdmin(admin.ModelAdmin):
         except ValidationError as e:
             self.message_user(request, f"Ошибка при сохранении чека: {e}", level='error')
 
+    def has_module_permission(self, request):
+        # Скрываем модель с главной страницы админки только для обычных пользователей
+        if request.user.is_superuser:
+            return True  # Суперпользователи видят модель
+        return False  # Обычные пользователи не видят модель
+
 @admin.register(Refund)
 class RefundAdmin(admin.ModelAdmin):
     list_display = ('id', 'receipt', 'refunded_at', 'amount', 'payment_method', 'shift')
     readonly_fields = ('refunded_at', 'amount', 'payment_method', 'shift')
+    search_fields = ['id', 'receipt__order__id', 'amount', 'receipt__id']
 
     def save_model(self, request, obj, form, change):
         try:

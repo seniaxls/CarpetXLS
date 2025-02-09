@@ -1,4 +1,3 @@
-from extra_settings.models import Setting
 from django.utils.timezone import localtime
 from simple_history.admin import SimpleHistoryAdmin
 from django.shortcuts import render, redirect
@@ -416,11 +415,7 @@ class OrderAdmin(SimpleHistoryAdmin):
             ),
         ]
 
-        if Setting.get('MESSAGE_FOR_ORDER_EDU_ACTIVE'):
-            fieldsets[0][1]['fields'].append(('first_message', 'second_message'))
 
-        if Setting.get('MESSAGE_FOR_ORDER_ACTIVE'):
-            fieldsets[0][1]['fields'].append(('message_for_order'))
 
         return fieldsets
 
@@ -434,31 +429,10 @@ class OrderAdmin(SimpleHistoryAdmin):
 
     client_phone_number.short_description = 'Телефон'
 
-    def message_for_order(self, order: Order):
-        value = Setting.get("MESSAGE_FOR_ORDER", default="django-extra-settings")
 
-        return value
 
-    def first_message(self, order: Order):
 
-        value = Setting.get("MESSAGE_FOR_ORDER_FIRST", default="django-extra-settings")
 
-        if order.pk:
-            value = Order.objects.get(pk=order.pk).stage.first_message
-            if value is None:
-                value = ''
-
-        return value
-
-    def second_message(self, order: Order):
-        value = Setting.get("MESSAGE_FOR_ORDER_SECOND", default="django-extra-settings")
-
-        if order.pk:
-            value = Order.objects.get(pk=order.pk).stage.second_message
-            if value is None:
-                value = ''
-
-        return value
 
     client_address.short_description = 'Адрес'
     message_for_order.short_description = 'Внимание'

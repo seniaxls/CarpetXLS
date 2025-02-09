@@ -16,8 +16,6 @@ urlpatterns = [
     path('payroll/', include('payroll.urls')),  # Маршруты payroll
 
 
-
-
 ]
 
 # Добавление статических файлов только в режиме разработки

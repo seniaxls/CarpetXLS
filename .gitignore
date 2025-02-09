@@ -17,7 +17,7 @@ staticfiles/
 media/
 
 # Конфигурационные файлы с секретами
-.env
+carpetxls/.env
 *.env
 .env.local
 .env.*
@@ -87,3 +87,6 @@ celerybeat-schedule
 .build/
 
 123
+222
+333
+444
