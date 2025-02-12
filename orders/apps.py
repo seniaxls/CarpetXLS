@@ -10,3 +10,4 @@ class OrdersConfig(AppConfig):
     def ready(self):
         # Импортируем сигналы, чтобы они были зарегистрированы
         import orders.signals
+

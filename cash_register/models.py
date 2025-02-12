@@ -152,10 +152,6 @@ class Receipt(models.Model):
         # Проверяем, что смена открыта
         if self.shift and self.shift.status == 'closed':
             raise ValidationError("Нельзя добавить чек в закрытую смену.")
-        # Проверяем, что для заказа можно создать новый чек
-        existing_receipt = Receipt.objects.filter(order=self.order).first()
-        if existing_receipt and not hasattr(existing_receipt, 'refund'):
-            raise ValidationError("Нельзя создать новый чек для заказа, пока не выполнен возврат по предыдущему чеку.")
         # Проверяем, что stage_group заказа равен 7
         if self.order.stage.group_stage != 7:
             raise ValidationError("Чек можно создать только для заказа с статусом ['Нужна доставка','Везем клиенту', 'Выполнен']")
@@ -178,7 +174,10 @@ class Receipt(models.Model):
         # Автоматическое заполнение суммы чека из заказа
         if not self.amount:
             self.amount = self.order.order_sum
+
         super().save(*args, **kwargs)
+
+
 
     def __str__(self):
         return f""

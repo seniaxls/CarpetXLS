@@ -9,7 +9,10 @@ from django.dispatch import receiver
 from django import utils
 from clients.models import Client
 from django.contrib.auth.models import Group
-from django.core.exceptions import PermissionDenied
+from django.db import models, transaction
+from django.core.exceptions import PermissionDenied, ValidationError
+from django.utils.timezone import now
+from datetime import timedelta
 
 
 from django.db import models
@@ -115,27 +118,50 @@ class Stage(models.Model):
         verbose_name_plural = "Этапы"
         ordering = ['id']  # Сортировка по PK (id) от меньшего к большему
 
+
+class TimeRange(models.Model):
+    """Модель для хранения предопределенных временных диапазонов."""
+    name = models.CharField(max_length=50, verbose_name="Название диапазона")
+    start_time = models.TimeField(verbose_name="Начало диапазона")
+    end_time = models.TimeField(verbose_name="Конец диапазона")
+
+    def __str__(self):
+        return f"{self.name} ({self.start_time.strftime('%H:%M')} - {self.end_time.strftime('%H:%M')})"
+
+    class Meta:
+        verbose_name = "Временной диапазон"
+        verbose_name_plural = "Временные диапазоны"
+
+
+class OrderNumberCounter(models.Model):
+    """Модель для хранения счетчика номеров заказов."""
+    counter = models.PositiveIntegerField(default=0, verbose_name="Счетчик заказов")
+
+    @classmethod
+    def get_next_order_number(cls):
+        """Атомарное получение следующего номера заказа с циклическим отображением."""
+        with transaction.atomic():
+            counter_obj, created = cls.objects.select_for_update().get_or_create(pk=1)
+            counter_obj.counter = (counter_obj.counter % 1000) + 1  # Цикл от 1 до 1000
+            counter_obj.save()
+            return f"{counter_obj.counter:03d}"
+
+
 class Order(models.Model):
     order_number = models.CharField(max_length=10, editable=False, verbose_name='Номер заказа')
-    stage = models.ForeignKey(
-        Stage,
-        on_delete=models.PROTECT,
-        related_name='orders',
-        verbose_name="Этап заказа",
-        null=True,  # Разрешаем NULL
-        blank=True,  # Разрешаем пустой выбор
-        default=5
-)
+    stage = models.ForeignKey(Stage, on_delete=models.PROTECT, related_name='orders', verbose_name="Этап заказа", null=True, blank=True, default=5)
     check_call = models.BooleanField(default=False, verbose_name="Позвонить")
     client = models.ForeignKey(Client, models.SET_NULL, blank=False, null=True, verbose_name='Клиент')
     order_sum = models.DecimalField(default=0, verbose_name='Сумма заказа', decimal_places=2, max_digits=7)
-    comment = models.TextField(default=None, verbose_name='Комментарий', blank=True)
+    comment = models.TextField(default='', verbose_name='Комментарий', blank=True)
     create_date = models.DateField(auto_now_add=True, verbose_name='Дата создания')
     created_at = models.DateTimeField(verbose_name="Дата создания", auto_now_add=True)
     updated_at = models.DateTimeField(verbose_name="Дата обновления", auto_now=True)
     target_date = models.DateField(blank=True, null=True, verbose_name='Целевая дата')
+    # Новые поля
+    time_range = models.ForeignKey(TimeRange, on_delete=models.SET_NULL, null=True, blank=True, verbose_name="Временной диапазон")
+    specific_time = models.TimeField(null=True, blank=True, verbose_name="Конкретное время")
     history = HistoricalRecords()  # Добавляем поле для отслеживания истории
-
 
     def __str__(self):
         return f"Заказ #{self.order_number or 'Без номера'}"
@@ -146,71 +172,74 @@ class Order(models.Model):
 
     @staticmethod
     def get_available_stages(user, obj=None):
-        # Определяем разрешенные этапы для пользователя
         accessible_stage_ids = set(GroupStagePermission.get_accessible_stages(user))
         if obj is None:
-            # При создании нового заказа доступна только первая группа этапов
             return Stage.objects.filter(group_stage=1, id__in=accessible_stage_ids)
         current_stage = obj.stage
-        # Добавляем текущий этап в список доступных
         available_stage_ids = {current_stage.id}
-        # Определяем текущую группу этапов
         current_group = current_stage.group_stage
-        # Если текущий этап является супер-этапом, добавляем этапы из следующей группы
         if current_stage.super_stage:
             next_group = current_group + 1
             next_group_stages = Stage.objects.filter(group_stage=next_group, id__in=accessible_stage_ids)
             available_stage_ids.update(next_group_stages.values_list('id', flat=True))
-            current_group_stages2 = Stage.objects.filter(super_stage=True,group_stage=current_group, id__in=accessible_stage_ids)
+            current_group_stages2 = Stage.objects.filter(super_stage=True, group_stage=current_group, id__in=accessible_stage_ids)
             available_stage_ids.update(current_group_stages2.values_list('id', flat=True))
         else:
-            # Иначе добавляем все этапы из текущей группы
             current_group_stages = Stage.objects.filter(group_stage=current_group, id__in=accessible_stage_ids)
             available_stage_ids.update(current_group_stages.values_list('id', flat=True))
-        # Для суперпользователя доступны все этапы, но они остаются организованными по группам
         if user.is_superuser:
             return Stage.objects.filter(id__in=available_stage_ids)
         return Stage.objects.filter(id__in=available_stage_ids)
 
+    def clean(self):
+        """
+        Проверка, что нельзя создать новый заказ с таким же клиентом,
+        если прошло меньше 2 минут.
+        Редактирование существующего заказа разрешено.
+        """
+        if self.client:
+            # Проверяем только для новых заказов (у которых нет pk)
+            if not self.pk:
+                recent_orders = Order.objects.filter(
+                    client=self.client,
+                    created_at__gte=now() - timedelta(minutes=2)  # Интервал в 2 минуты
+                ).exists()
+                if recent_orders:
+                    raise ValidationError("Нельзя создать новый заказ для этого клиента раньше, чем через 2 минуты после предыдущего.")
+
     def save(self, *args, **kwargs):
-        # Автоматическая генерация номера заказа
-        if not self.order_number:
-            last_order = Order.objects.all().last()
-            self.order_number = f"{(last_order.id + 1):03d}" if last_order else "001"
+        with transaction.atomic():
+            # Блокируем объект для предотвращения состояния гонки
+            Order.objects.select_for_update().filter(pk=self.pk).exists()
+            if not self.order_number:
+                # Получаем уникальный номер заказа через атомарный счетчик
+                self.order_number = OrderNumberCounter.get_next_order_number()
+            from django.contrib.auth import get_user_model
+            User = get_user_model()
+            user = kwargs.pop('user', None) or getattr(self, '_user', None)
+            if user and not user.is_superuser:
+                accessible_stage_ids = set(GroupStagePermission.get_accessible_stages(user))
+                if self.stage_id and self.stage_id not in accessible_stage_ids:
+                    raise PermissionDenied(f"У вас нет прав на установку этапа '{self.stage.name}'.")
+            reset_stage = Stage.objects.filter(name='Сброс').first()
+            accepted_in_workshop_stage = Stage.objects.filter(name='Принят в цех').first()
+            if reset_stage and accepted_in_workshop_stage and self.stage == reset_stage:
+                self.stage = accepted_in_workshop_stage
+            stages_with_check_call = Stage.objects.filter(
+                name__in=['Нужен вывоз', 'Чистый-Склад', 'Нужна доставка', 'Вывоз возврата']
+            ).values_list('id', flat=True)
+            if self.stage_id in stages_with_check_call:
+                if not hasattr(self, '_manual_check_call_change'):
+                    self.check_call = True
+            # Вызываем метод clean() для выполнения валидации
+            self.clean()
+            super().save(*args, **kwargs)
+            for product_order in self.product_order.all():
+                product_order.update_message()
+                product_order.save()
 
-        # Проверяем, имеет ли пользователь право на выбранный этап
-        from django.contrib.auth import get_user_model
-        User = get_user_model()
-        user = kwargs.pop('user', None) or getattr(self, '_user', None)
-        if user and not user.is_superuser:
-            accessible_stage_ids = set(GroupStagePermission.get_accessible_stages(user))
-            if self.stage_id and self.stage_id not in accessible_stage_ids:
-                raise PermissionDenied(f"У вас нет прав на установку этапа '{self.stage.name}'.")
 
-        # Автоматическое изменение этапа с 'Сброс' на 'Принят в цех'
-        reset_stage = Stage.objects.filter(name='Сброс').first()
-        accepted_in_workshop_stage = Stage.objects.filter(name='Принят в цех').first()
-        if reset_stage and accepted_in_workshop_stage and self.stage == reset_stage:
-            self.stage = accepted_in_workshop_stage
-            print("Этап заказа автоматически изменен с 'Сброс' на 'Принят в цех'.")
 
-        # Автоматическая установка флага 'Позвонить' для определённых этапов
-        stages_with_check_call = Stage.objects.filter(
-            name__in=['Нужен вывоз', 'Чистый-Склад', 'Нужна доставка', 'Вывоз возврата']
-        ).values_list('id', flat=True)
-
-        # Проверяем, был ли флаг check_call изменён вручную
-        if self.stage_id in stages_with_check_call:
-            # Устанавливаем флаг только если он не был снят вручную
-            if not hasattr(self, '_manual_check_call_change'):
-                self.check_call = True
-                print(f"Флаг 'Позвонить' автоматически установлен для этапа '{self.stage.name}'.")
-
-        super().save(*args, **kwargs)
-
-        for product_order in self.product_order.all():
-            product_order.update_message()
-            product_order.save()
 
 class GroupStagePermission(models.Model):
     group = models.ForeignKey(Group, on_delete=models.CASCADE, verbose_name="Группа пользователей")

@@ -3,6 +3,13 @@ from django.urls import path, include
 from django.conf.urls.static import static
 from django.conf import settings
 from django.shortcuts import redirect  # Импортируем функцию redirect
+from orders import views
+from django.http import JsonResponse
+
+def test_headers_view(request):
+    # Получаем значение заголовка X-Requested-With
+    x_requested_with = request.headers.get('X-Requested-With', 'Not Provided')
+    return JsonResponse({'X-Requested-With': x_requested_with})
 
 
 urlpatterns = [
@@ -14,6 +21,10 @@ urlpatterns = [
 
     # Подключение маршрутов приложения payroll
     path('payroll/', include('payroll.urls')),  # Маршруты payroll
+
+    path('telegram-browser-info/', views.telegram_browser_info, name='telegram_browser_info'),
+
+    path('test-headers/', test_headers_view, name='test_headers'),
 
 
 ]

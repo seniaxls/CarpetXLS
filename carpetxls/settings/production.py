@@ -1,5 +1,3 @@
-# settings/production.py
-
 from .base import *
 
 # SECURITY WARNING: keep the secret key used in production secret!
@@ -11,7 +9,7 @@ if not SECRET_KEY:
 DEBUG = False
 
 # Allowed hosts
-ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', '').split(',')
+ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'carpetxls.ru').split(',')
 
 # Logging
 LOGGING = {

@@ -1,0 +1,101 @@
+version: '3.8'
+services:
+  postgres:
+    image: postgres:15
+    container_name: postgres
+    environment:
+      POSTGRES_DB: carpetxls
+      POSTGRES_USER: root
+      POSTGRES_PASSWORD: 123321
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@example.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+      - "5050:80"
+    depends_on:
+      - postgres
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+
+  redis:
+    image: redis:7
+    container_name: redis
+    ports:
+      - "6379:6379"
+
+  django:
+    build: .
+    container_name: django
+    command: >
+      sh -c "python manage.py collectstatic --noinput &&
+             gunicorn --bind 0.0.0.0:8000 carpetxls.wsgi:application"
+    volumes:
+      - .:/app
+      - static_volume:/app/static_cdn
+      - media_volume:/app/media
+    expose:
+      - "8000"
+    depends_on:
+      - postgres
+      - redis
+    environment:
+      DB_ENGINE: django.db.backends.postgresql
+      DB_NAME: carpetxls
+      DB_USER: root
+      DB_PASSWORD: 123321
+      DB_HOST: postgres
+      DB_PORT: 5432
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+
+  celery:
+    build: .
+    container_name: celery
+    command: celery -A carpetxls worker --loglevel=info
+    working_dir: /app
+    depends_on:
+      - redis
+      - django
+    environment:
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+
+  flower:
+    build: .
+    container_name: flower
+    command: celery -A carpetxls flower --port=5555
+    working_dir: /app
+    ports:
+      - "5556:5555"
+    depends_on:
+      - redis
+      - celery
+    environment:
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+
+  nginx:
+    image: nginx:alpine
+    container_name: nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - static_volume:/app/static_cdn
+      - media_volume:/app/media
+    depends_on:
+      - django
+
+volumes:
+  postgres_data:
+  pgadmin_data:
+  static_volume:
+  media_volume:

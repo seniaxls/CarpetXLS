@@ -3,7 +3,7 @@ from orders.models import Order, ProductOrder, Product, ProductAdd
 from django.contrib.auth.models import User
 
 class PayrollRecord(models.Model):
-    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    user = models.ForeignKey(User, on_delete=models.CASCADE, null=True)
     order = models.ForeignKey(Order, on_delete=models.CASCADE)
     status = models.CharField(max_length=50)
     product_name = models.CharField(max_length=100, null=True, blank=True)
@@ -16,4 +16,5 @@ class PayrollRecord(models.Model):
         verbose_name_plural = 'Записи зарплат'
 
     def __str__(self):
-        return f"{self.user.username} - {self.status} ({self.order.order_number})"
+        username = self.user.username if self.user else 'Unknown User'
+        return f"{username} - {self.status} ({self.order.order_number})"

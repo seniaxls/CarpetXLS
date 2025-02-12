@@ -6,6 +6,7 @@ from django.shortcuts import render, redirect
 from django.utils.html import format_html
 from django.contrib import admin
 from django.utils.translation import gettext_lazy as _
+from django.forms import TimeInput
 
 from cash_register.models import Receipt
 from .models import *
@@ -28,7 +29,13 @@ class ProductAddReadonlyWidget(forms.Widget):
         return mark_safe(f"<ul>{items}</ul>")
 
 
-
+class OrderForm(forms.ModelForm):
+    class Meta:
+        model = Order
+        fields = '__all__'
+        widgets = {
+            'specific_time': TimeInput(format='%H:%M', attrs={'type': 'time'}),  # Используем виджет HTML5 <input type="time">
+        }
 
 
 class ProductOrderForm(forms.ModelForm):
@@ -299,7 +306,7 @@ class CheckCallFilter(admin.SimpleListFilter):
 
 class OrderAdmin(SimpleHistoryAdmin):
     history_list_display = ['changed_fields']
-    fields = (('client', 'stage', 'check_call', "target_date"), ("comment",),
+    fields = (('client', 'stage', 'check_call'), ("target_date","time_range","specific_time"), ("comment",),
               ('order_sum', 'client_address', 'client_phone_number'))
     list_per_page = 15
     inlines = [ProductOrderInline, SecondProductOrderInline, ReceiptInline]
@@ -316,6 +323,7 @@ class OrderAdmin(SimpleHistoryAdmin):
     list_filter = (CreateDateFilter, UpdateDateFilter, CheckCallFilter, StageFilter)
     list_editable = ['check_call']
     change_form_template = "admin/orders/Order/change_form.html"
+    form = OrderForm
 
     class Media:
         css = {
@@ -675,11 +683,15 @@ class ProductUnitEdite(admin.ModelAdmin):
 
 admin.site.register(Order, OrderAdmin)
 admin.site.register(Product)
+admin.site.register(SecondProductOrder)
+admin.site.register(ProductOrder)
 admin.site.register(ProductAdd)
 admin.site.register(SecondProduct)
 admin.site.register(Stage)
+admin.site.register(TimeRange)
 admin.site.register(ProductUnit, ProductUnitEdite)
 
 admin.site.site_header = 'carpetxls'
-admin.site.site_title = ''
-admin.site.index_title = ''
+admin.site.site_title = 'carpetxls'
+admin.site.index_title = 'carpetxls'
+admin.site.page_title = 'carpetxls'

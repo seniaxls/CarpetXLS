@@ -1,15 +1,9 @@
-# settings/base.py
-
 from pathlib import Path
 import os
 from dotenv import load_dotenv
 
 # Загрузка переменных окружения из .env
 load_dotenv()
-DADATA_TOKEN = os.getenv('DADATA_TOKEN')
-
-
-
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
@@ -26,7 +20,6 @@ INSTALLED_APPS = [
     'orders.apps.OrdersConfig',
     'payroll.apps.PayrollConfig',
     'simple_history',
-    'nested_admin',
     'account',
     'cash_register',
 ]
@@ -40,7 +33,10 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'orders.middleware.DeviceDetectionMiddleware',
+    'orders.middleware.TelegramBrowserRedirectMiddleware',
 ]
+
+DATA_UPLOAD_MAX_NUMBER_FIELDS = 5000
 
 ROOT_URLCONF = 'carpetxls.urls'
 
@@ -97,15 +93,19 @@ USE_TZ = True
 
 # Static files (CSS, JavaScript, Images)
 STATIC_URL = '/static/'
-STATICFILES_DIRS = [BASE_DIR / 'static']
-STATIC_ROOT = BASE_DIR / 'static_cdn'
+STATIC_ROOT = BASE_DIR / 'static_cdn'  # Путь для собранной версии статических файлов
+STATICFILES_DIRS = [BASE_DIR / 'static']  # Путь к исходным статическим файлам
 
 MEDIA_URL = '/media/'
-MEDIA_ROOT = BASE_DIR / 'media'
+MEDIA_ROOT = BASE_DIR / 'media'  # Путь для медиафайлов
 
 # Default primary key field type
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # Celery configuration
-CELERY_BROKER_URL = os.getenv('REDIS_URL')
-CELERY_RESULT_BACKEND = os.getenv('REDIS_URL')
+CELERY_BROKER_URL = os.getenv('CELERY_BROKER_URL', 'redis://redis:6379/0')
+CELERY_RESULT_BACKEND = os.getenv('CELERY_RESULT_BACKEND', 'redis://redis:6379/0')
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
+CELERY_TIMEZONE = 'UTC'

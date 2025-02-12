@@ -4,6 +4,7 @@ from django.dispatch import receiver
 from orders.models import Order, ProductOrder, ProductAdd
 from .models import PayrollRecord
 import decimal
+from django.contrib.auth.models import User
 
 def calculate_product_area(product_order):
     width = product_order.width or decimal.Decimal('0.0')
@@ -46,7 +47,7 @@ def handle_order_status_change(sender, instance, **kwargs):
 
     history_manager = get_history_manager_for_model(Order)
     latest_history = history_manager.filter(id=instance.id).first()
-    user = latest_history.history_user if latest_history else None
+    user = latest_history.history_user if (latest_history and latest_history.history_user) else User.objects.get_or_create(username='system')[0]
 
     for product_order in instance.second_product_orders.all():
         area = product_order.second_amount
